@@ -1,8 +1,8 @@
 from __future__ import division
-#generic imports
-import sys,math,re,copy,random
+#GENERIC IMPORTS
+import sys,os,re,copy
 import numpy as np
-#cctbx imports
+#CCTBX IMPORTS
 import iotbx.pdb
 from mmtbx import monomer_library
 from libtbx import group_args
@@ -22,51 +22,50 @@ from iotbx import reflection_file_utils
 from cctbx.array_family import flex
 from cctbx import maptbx
 
-#PProbe imports
-from PProbe_util import Util as pputil
-
-
-
-#our class gets passed the following:
-#pdb root = pdb file we're working with
-#map_coeffs = filename of MTZ weighted 2fofc and fofc map coeffs
-#symmetry = cctbx symmetry object of original structure (sg, unit cell)
-# 3 different pdb hierarchies:
-#   1) original structure with all atoms/waters/etc. "orig_pdb"
-#   2) structure stripped of water/sulfate/phospahte "strip_pdb"
-#   3) pdb format of fofc peaks from #2 "peaks_pdb"
-#chainid and resid of the peak 
-#peak coords
-#bound = extents +/- for mini map box
+#PProbe IMPORTS
+from PProbe_util import Util
 
 class PeakObj:
     """
+    A class for a "peak" object with all associated data for a particular peak
     This class gets instantiated for every peak, and can be a bit demanding for cpu and memory
+    Constructor takes the following:
+         StructData object that contains pdb_code, all pdbs/xrs/maps
+         Peak Specific info: chainid,coord,bound, option to specify stripped pdb
+    Initialization does the following:
+         1)makes local maps on the standard 0.5A grid around the peak
+         2)makes versions of these maps (shaped, round, etc.)
+
     """
-    def __init__(self,pdb_code,symmetry,orig_pdb_hier,strip_pdb_hier,peak_pdb_hier,struct_data,chainid,resid,coord,bound):
+    def __init__(self,pdb_code,symmetry,orig_pdb_hier,strip_pdb_hier,peak_pdb_hier,struct_data,chainid,resid,coord,bound,strip_pdb=None):
         #instantiate utility class
-        self.pput = pputil()
-        #set class variables
-        self.pdb_code = pdb_code
-        self.orig_symmetry = symmetry
-        self.orig_pdb_hier = orig_pdb_hier 
-        self.orig_xrs = self.orig_pdb_hier.extract_xray_structure(crystal_symmetry=self.orig_symmetry)
-        self.strip_pdb_hier = orig_pdb_hier 
-        self.peak_pdb_hier = peak_pdb_hier 
+        self.pput = Util()
+        #attach references to structure data for use in this class
+        self.pdb_code = struct_data.pdb_code
+        self.orig_symmetry = struct_data.orig_symmetry
+        self.orig_pdb_hier = struct_data.orig_pdb_hier
+        self.orig_xrs = struct_data.orig_xrs
+        #if pdb was stripped, then analyzed, keep versions straight
+        if not strip_pdb:
+            self.strip_pdb_hier = orig_pdb_hier 
+        else:
+            self.strip_pdb_hier = strip_pdb
+        self.peak_pdb_hier = struct_data.peak_pdb_hier 
         self.struct_data = struct_data
-        self.chainid = chainid
+
+        self.chainid = chainid #single letter string
         self.resid = int(resid)
-        self.coord = coord
+        self.coord = coord #tuple of floats
         self.bound = bound
         self.grid_last = int(self.bound*4+1)
+        
         #make local maps
-        self.local_map_fofc, self.peak_volume_fofc = self.make_local_map(struct_data.fofc_map_data)
-        self.local_map_2fofc, self.peak_volume_2fofc = self.make_local_map(struct_data.twofofc_map_data)
+        self.local_map_fofc, self.peak_volume_fofc = self.make_local_map(self.struct_data.fofc_map_data)
+        self.local_map_2fofc, self.peak_volume_2fofc = self.make_local_map(self.struct_data.twofofc_map_data)
         #set peak heights of initial peak
         self.peak_fofc = self.density_at_point(self.struct_data.fofc_map_data,self.orig_xrs,self.coord)
         self.peak_2fofc = self.density_at_point(self.struct_data.twofofc_map_data,self.orig_xrs,self.coord)
-        #self.round_map_fofc = self.make_round_map(self.local_map_fofc,2.0,False)
-        #self.round_map_2fofc = self.make_round_map(self.local_map_2fofc,2.0,False)
+
         self.shaped_map_fofc = self.make_shaped_map(self.local_map_fofc)
         self.shaped_map_2fofc = self.make_shaped_map(self.local_map_2fofc)
         self.inv_map_fofc = self.make_round_map(self.local_map_fofc,2.0,True)
@@ -157,7 +156,7 @@ class PeakObj:
         max_index= np.array(np.where(map_array == np.amax(map_array)))
         max_coords = 0.5*max_index
         dist = np.sqrt((max_coords[0] - 5.0)**2 + (max_coords[1]-5.0)**2 + (max_coords[2] - 5.0)**2)
-        return dist
+        return np.amin(dist)
         
 
     def make_shaped_map(self,square_map):
@@ -184,7 +183,7 @@ class PeakObj:
             #so here is a function that behaves like an inverse
             #for values above 0.1, but then plateaus off
             inv_map_points=flex.double(square_map.size())
-            dampfunc = lambda x: (1.0/((1.0+math.exp(-100*(x-0.1)))))
+            dampfunc = lambda x: (1.0/((1.0+np.exp(-100*(x-0.1)))))
             for index,value in enumerate(square_map):
                 if abs(value) > 0.00001:
                     dval = dampfunc(abs(value))

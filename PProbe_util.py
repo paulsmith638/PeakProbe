@@ -36,59 +36,6 @@ class Util:
             return "XXX"
             
 
-      def rotate_about_2ptaxis(self,pdb_hier,coor1,coor2,rot):
-      # utility function that rotates a set of coordinates around an arbitrary
-      # axis defined by two points by a rotation in degrees
-      #coor1 is the center of rotation origin (input as 3tuple)
-      #coor2 gives the vector which forms the rotation axis
-      #a new copy of coords are returned as hierarchy
-            new_hier = pdb_hier.deep_copy()	
-            x1,y1,z1 = coor1
-            x2,y2,z2 = coor2
-            rad = 2*math.pi*rot/360.0 
-            (u,v,w) = (x2-x1,y2-y1,z2-z1)
-            L = u**2 + v**2 + w**2
-            rt = matrix.rt(([(u**2 + (v**2+w**2)*math.cos(rad))/L,
-                             (u*v*(1 - math.cos(rad)) - w*math.sqrt(L)*math.sin(rad))/L,
-                             (u*w*(1-math.cos(rad)) + v*math.sqrt(L)*math.sin(rad))/L,
-                             (u*v*(1-math.cos(rad))+w*math.sqrt(L)*math.sin(rad))/L,
-                             (v**2 + (u**2+w**2)*math.cos(rad))/L,
-                             (v*w*(1-math.cos(rad))-u*math.sqrt(L)*math.sin(rad))/L,
-                             (u*w*(1-math.cos(rad))-v*math.sqrt(L)*math.sin(rad))/L,
-                             (v*w*(1-math.cos(rad))+u*math.sqrt(L)*math.sin(rad))/L,
-                             (w**2 + (u**2+v**2)*math.cos(rad))/L],
-                            [((x1*(v**2+w**2) - u*(y1*v + z1*w))*(1-math.cos(rad))+(y1*w - z1*v)*math.sqrt(L)*math.sin(rad))/L,
-                             ((y1*(u**2+w**2) - v*(x1*u + z1*w))*(1-math.cos(rad))+(z1*u - x1*w)*math.sqrt(L)*math.sin(rad))/L,
-                             ((z1*(u**2+v**2) - w*(x1*u + y1*v))*(1-math.cos(rad))+(x1*v - y1*u)*math.sqrt(L)*math.sin(rad))/L,]))
-            atoms = new_hier.atoms()
-            sites = atoms.extract_xyz()
-            atoms.set_xyz(rt.r.elems * sites + rt.t.elems)
-            return new_hier
-  
-  
-      def rotate_so4(self,pdb_hier,axis,degrees):
-      #selects atom pairs for rotation, atom 1 is central S or P, atom 2 is an oxygen
-            s_select = "(name S) or (name P)"
-            if axis == 1:
-                  o_select = "name O1"
-            if axis == 2:
-                  o_select = "name O2"
-            if axis == 3:
-                  o_select = "name O3"
-            if axis == 4:
-                  o_select = "name O4"
-            atoms = pdb_hier.atoms()  
-            sel_cache = pdb_hier.atom_selection_cache()
-            s_atsel = sel_cache.selection(s_select)
-            s_atom = atoms.select(s_atsel)
-            #gets the sulfur/phosphorous atom
-            s_coords = list(s_atom.extract_xyz())[0]
-            o_atsel = sel_cache.selection(o_select)
-            o_atom = atoms.select(o_atsel)
-            o_coords = list(o_atom.extract_xyz())[0]
-            return self.rotate_about_2ptaxis(pdb_hier,s_coords,o_coords,degrees)
-    
-
 
       def charge(self,peak_object):
       #no longer "charge", but rather a probabilistic evaluation of the local environment

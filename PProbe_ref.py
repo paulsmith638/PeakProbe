@@ -28,7 +28,7 @@ from iotbx.ccp4_map import write_ccp4_map
 from cctbx import sgtbx
 
 
-class mini_ref:
+class RSRefinements:
     def __init__(self,PeakObj):
         self.peak_obj = PeakObj
         self.pdb_code = self.peak_obj.pdb_code

@@ -1,7 +1,7 @@
 from __future__ import division
 import sys,copy
 import numpy as np
-
+#CCTBX IMPORTS
 import iotbx.pdb
 from mmtbx import monomer_library
 from cctbx import miller
@@ -35,7 +35,7 @@ from PProbe_util import Util as pputil
 #   3) pdb format of fofc peaks from #2 "peaks_pdb"
 
 
-class Data:
+class StructData:
     def __init__(self,pdb_code,symmetry,orig_pdb_hier,strip_pdb_hier,peak_pdb_hier,map_file):
         #instantiate utility class
         self.pput = pputil()

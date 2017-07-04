@@ -14,169 +14,97 @@ import sqlite3 as lite
 import matplotlib as mpl
 mpl.use('TkAgg')
 import matplotlib.pyplot as plt
-from PProbe_classify import ClassifierFunctions as ppclas
-
-#constant for training
-RESMIN = 0.7
-RESMAX = 4.2
+from PProbe_classify import ClassifierFunctions
+from PProbe_stats import StatFunc
+from PProbe_matrix import PCA
 
 #functions used in resolution dependent scaling schemes
 class TrainingFunctions:
-     def __init__(self,verbose=False):
-          cfunc = ppclas(verbose=True)
+     def __init__(self,verbose=False,fastmode=False):
+          ppcf = ClassifierFunctions(verbose=True)
+          ppstat = StatFunc()
+          pppca = PCA()
           #function from classifier needed here
           #pass references to generate unbound methods
-          self.johnsonsu_stats=cfunc.johnsonsu_stats
-          self.johnsonsu_pdf=cfunc.johnsonsu_pdf
-          self.get_stats=cfunc.get_stats
-          self.get_res_scales=cfunc.get_res_scales
-          self.get_post_pca_scales = cfunc.get_post_pca_scales
-          self.get_jsu_coeffs = cfunc.get_jsu_coeffs
-          self.gen_xform_mat = cfunc.gen_xform_mat
-          self.xform_data = cfunc.xform_data
-          self.standardize_data = cfunc.standardize_data
-          self.pca_xform_data = cfunc.pca_xform_data
-          self.discriminant_analysis = cfunc.discriminant_analysis
-          self.ppsel = cfunc.ppsel #inherit imported class?
+          self.johnsonsu_stats=ppstat.johnsonsu_stats
+          self.jsu_mean = ppstat.jsu_mean
+          self.jsu_var = ppstat.jsu_var
+          self.johnsonsu_pdf=ppstat.johnsonsu_pdf
+          self.get_stats=ppcf.get_stats
+          self.spline_basis = ppstat.spline_basis
+          self.spline4k = ppstat.spline4k
+          self.modal_matrix = pppca.modal_matrix
+          self.pca_by_bin = pppca.pca_by_bin
+          self.eig_sort = pppca.eig_sort
 
+          self.get_res_scales=ppcf.get_res_scales
+          self.get_post_pca_scales = ppcf.get_post_pca_scales
+          self.get_jsu_coeffs = ppcf.get_jsu_coeffs
+          self.gen_xform_mat = ppcf.gen_xform_mat
+          self.xform_data = ppcf.xform_data
+          self.standardize_data = ppcf.standardize_data
+          self.pca_xform_data = ppcf.pca_xform_data
+          self.discriminant_analysis = ppcf.discriminant_analysis
+          self.batch_da = ppcf.batch_da
+          self.initialize_results = ppcf.initialize_results
+          self.score_stats = ppcf.score_stats
+          self.ppsel = ppcf.ppsel #inherit imported class?
+
+          #option for speedup for code testing
+          self.fastmode = fastmode
+          
+     """
+     Functions for curve fitting, require scipy which doesn't play nice with phenix.python
+     Use caution with imports
+     """
+
+     #JSU FITTING
      def johnsonsu_target(self,param,xval,yval):
           a,b,loc,scale = param
-          #include L2 norm, weight on errors empirical
-          return np.dot(param,param)+100.0*np.sum((yval-self.johnsonsu_pdf(xval,a,b,loc,scale))**2)
+          #b(delta) and scale(lambda) are highly correlated
+          #weight on errors empirical
+          #jsu_variance unstable when delta(b) is small and gamma(a) is more than 1.0
+          #l2 norm on b and scale
+          l2 = (b*b)+(scale*scale)
+          var_penalty = self.jsu_var(param)
+          return 0.1*var_penalty+l2+100.0*np.sum((yval-self.johnsonsu_pdf(xval,a,b,loc,scale))**2)
 
      def fit_jsu(self,xval,yval):
-          initial = np.array((1.0,1.0,np.nanmean(xval),1.0))
-          #constraints = np.array([(0.01,10.0),(-50.0,50.0),(-50.0,50.0),(ymin-3.0*yrange,ymax+3.0*yrange),
-          #                   (ymin-3.0*yrange,ymax+3.0*yrange),(-yrange/1.0,yrange/1.0),(-yrange/1.0,yrange/1.0)])
-          L = op.fmin_bfgs(self.johnsonsu_target,initial,args=(xval,yval))
-          return L
+          initial = np.array((0.0,1.0,xval[np.argmax(yval)],1.0))
+          constraints = np.array([(-999.0,999.0),(0.5,999.0),(-999.0,999.0),(0.05,999.0)])
+          L = op.fmin_l_bfgs_b(self.johnsonsu_target,initial,args=(xval,yval),bounds=constraints,approx_grad=True,disp=False)
+          return L[0]
      
-
-     # Chisq functions not currently used in workflow, but there to check
-     # distributions of feature vector Euclidian distances during rejection 
-     # cycles -- as misidentified peaks are rejected, the distribution of 
-     # these distances in the kernel matrix converged nicely to a chisq
-     # distribution
-     def chisq_pdf(self,param,xval):
-          k,loc,scale = param
-          #allow non-discrete dof
-          gamma_int = lambda x,z: (x**(z-1))*np.exp(-x)
-          gamma_k2 = spi.quad(gamma_int,0,np.inf,args=(k/2.0,))[0]
-          xval = (xval-loc)/scale
-          chisq = 1/(2**(k/2.0)*(gamma_k2))*xval**((k/2.0)-1)*np.exp(-xval/2.0)
-          return chisq/scale
-
-     def chisq_cdf(self,param,xval):
-          #terrible hack at numerical integration and iteration
-          numbins = 1000
-          values = []
-          for x in xval:
-               bins = np.linspace(0,x,numbins)
-               binwidth = float(x)/numbins
-               cdfsum = np.nansum(self.chisq_pdf(param,bins)*binwidth)
-               values.append(cdfsum)
-          return np.array(values)
-          
-     def chisq_target(self,param,xval,yval):
-          target=np.nansum((yval - self.chisq_pdf(param,xval))**2)
-          return target
-
-     def chisq_fit(self,xval,yval):
-          initial = np.array((1.0,0.0,1.0))#initial dof,loc,scale guesses
-          constraints = np.array([(3.0,99.0),(0.0,100),(0.1,99.0)])
-          L = op.fmin_l_bfgs_b(self.chisq_target,initial,args=(xval,yval),bounds=constraints,approx_grad=True)
-          xtest = np.linspace(0,1000,1000)
-          print "DIST STAT",np.nansum(self.chisq_pdf(L[0],xtest)),np.nansum(np.multiply(self.chisq_pdf(L[0],xtest),xtest))
-          return (L[0],np.nansum(np.multiply(self.chisq_pdf(L[0],xtest),xtest)))
-
 
      """
      SPLINE fitting, currently fixed at 4 internal knots
      """
 
-     #@profile
-     def spline_basis(self,knotn,knotk,xval):
-          #taken from http://www.stat.columbia.edu/~madigan/DM08/regularization.ppt.pdf
-          #returns dk(X)
-          #knotn is segment knot, knotk is outer (right) knot
-          #putmask faster than np.clip()
-          xshiftn = xval-knotn
-          xshiftk = xval-knotk
-          np.putmask(xshiftn,xshiftn < 0.0,0)
-          np.putmask(xshiftk,xshiftk < 0.0,0)
-          #dkX = (np.clip(xval-knotn,0,np.inf)**3 - np.clip(xval-knotk,0,np.inf)**3)/(knotk-knotn)
-          #inline multiplication about 2x faster than np.pow or **
-          dkX = (xshiftn*xshiftn*xshiftn - xshiftk*xshiftk*xshiftk)/(knotk-knotn)
-          return dkX
-
-     def spline4k(self,param,xval):
-          #knot x values
-          #6 evenly spaced knots between 1 and 4A.
-          knots = np.linspace(1.0,RESMAX,6)
-          #cubic spline regression on 1.0,x,and natural cubic spline basis functions
-          linear_terms = param[0]*np.ones(xval.shape[0])+param[1]*xval
-          num_dterms = knots.shape[0] - 2
-          dterms = np.zeros(xval.shape[0])
-          for i in range(num_dterms):
-               basis=self.spline_basis(knots[i],knots[-1],xval) - self.spline_basis(knots[-2],knots[-1],xval)
-               dterms=dterms+param[i+2]*basis
-
-          return linear_terms + dterms
-
-          
      def spline4k_target(self,param,xval,yval):
-          #return np.dot(param,param)**2 + 1000.0*np.nansum((yval - self.spline4k(param,xval))**2)
+          #includes L1 norm
           return np.nansum(np.abs(param)) + 1000.0*np.nansum((yval - self.spline4k(param,xval))**2) 
 
 
      def spline4k_fit(self,xval,yval,augment=False):
           initial = np.ones(6)
           if augment:
-               axval = np.zeros(xval.shape[0] + 1)
-               ayval = np.zeros(xval.shape[0] + 1)
-               for index in range(xval.shape[0]):
-                    axval[index] = xval[index]
-                    ayval[index] = yval[index]
-               axval[-1] = 5.0 #dummy point at 5.0A to keep splines flat
+               #appends point and start and end of array equal to lowest/highest value
+               #at 0.3 and 5.0 resolution to keep spline fitting from going off the rails
+               #would be better to use a spline with defined slopes past the knots
+
+               axval = np.zeros(xval.shape[0] + 2)
+               ayval = np.zeros(xval.shape[0] + 2)
+               for index in np.arange(1,xval.shape[0]+1,1):
+                    axval[index] = xval[index-1]
+                    ayval[index] = yval[index-1]
+               axval[0] = 0.6
+               axval[-1] = 5.0 
+               ayval[0] = yval[0]
                ayval[-1] = yval[-1]
                xval = axval
                yval = ayval
-          L = op.fmin_bfgs(self.spline4k_target,initial,args=(xval,yval))
+          L = op.fmin_bfgs(self.spline4k_target,initial,args=(xval,yval),disp=False)
           return L
-
-     #appends point and start and end of array equal to lowest/highest value
-     #at 0.5 and 5.0 resolution to keep spline fitting from going off the rails
-     #would be better to use a spline with defined slopes past the knots
-
-     def augment_array(self,array,is_res=False):
-          return array
-          if len(array.shape) == 2:
-               new_array = np.zeros((array.shape[0],array.shape[1]+2),dtype=np.float64)
-               if is_res:
-                    new_array[:,0] = np.ones(array.shape[1])*0.5
-                    new_array[:,-1] = np.ones(array.shape[1])*5.0
-               else:
-                    new_array[:,0] = array[:,0]
-                    new_array[:,-1] = array[:,-1]
-               for column in range(array.shape[0]):
-                    new_array[:,column+1] = array[:,column]
-
-          if len(array.shape) == 1:
-               array_size = array.shape[0] + 2
-               new_array = np.zeros(array_size,dtype=np.float64)
-               if is_res:
-                    new_array[0] = 0.5
-                    new_array[-1] = 5.0
-               else:
-                    new_array[0] = array[0]
-                    new_array[-1] = array[-1]
-               for column in range(array.shape[0]):
-                    new_array[column+1] = array[column]
-          #return new_array
-
-               
-          
-
 
      """
      functions for training
@@ -198,10 +126,11 @@ class TrainingFunctions:
                col_names=selectors.pca_view_col
           else:
                col_names = selectors.std_view_col
-          print "RESSCALE",col_names
+          print "RESOLUTION DEPENDENT SCALING"
           res = data_array['res']
           if plot:
                gridplot = plt.figure(figsize=(24,16))
+          bin_mask,num_bins = self.calc_res_bins(data_array,30,target_res_bin_width=0.075)
           for index,column in enumerate(col_names):
                data_column = data_array[column]
                col_res,col_smean,col_wmean,col_sstd,col_wstd,col_std = [],[],[],[],[],[]
@@ -209,90 +138,59 @@ class TrainingFunctions:
                                                                      selectors.inc_obsw_bool,
                                                                      selectors.included_data_bool)):
                     input_data = data_column[selector]
+                    input_binmask = bin_mask[selector]
                     input_res = res[selector]
-                    binstep = 0.25
-                    #40 resolution windows frm resmin to resmax
-                    for i in np.linspace(RESMIN,RESMAX,40):
-                         binlr_sel = np.apply_along_axis(lambda x: x > i,0,input_res)
-                         binhr_sel = np.apply_along_axis(lambda x: x <= binstep+i,0,input_res)
-                         binres_sel = np.logical_and(binlr_sel,binhr_sel)
-                         input_data_bin=input_data[binres_sel]
-                         res_bin=input_res[binres_sel]
+                    for i in np.arange(num_bins + 1):
+                         input_data_bin=input_data[input_binmask == i]
+                         res_bin=input_res[input_binmask == i]
                          #if at least 10 peaks in the bin
-                         if input_data_bin.shape[0] > 10:
-                              bin_resmean = np.nanmean(res_bin)
-                              #get std from entire population
-                              if population == "all":
-                                   col_res.append(bin_resmean)
-                                   col_std.append(np.nanstd(input_data_bin))
-                              #mean of obsss
-                              if population == "obss":
-                                   col_smean.append(np.nanmean(input_data_bin))
-                                   col_sstd.append(np.nanstd(input_data_bin))
-                              #mean of obsw
-                              if population == "obsw":
-                                   col_wmean.append(np.nanmean(input_data_bin))
-                                   col_wstd.append(np.nanstd(input_data_bin))
-                         #very few peaks at low resolution, extend data as needed from previous bins
-                         else:
-                              if population == "all":
-                                   try:
-                                        col_res.append(col_res[-1])
-                                        col_std.append(col_std[-1])
-                                   except:
-                                        col_std.append(1.0)
-                                        try:
-                                             col_res.append(col_res[-1])
-                                        except:
-                                             col_res.append(1.0)
-                              if population == "obss":
-                                   try:
-                                        col_smean.append(col_smean[-1])
-                                        col_sstd.append(col_sstd[-1])
-                                   except:
-                                        col_smean.append(1.0)
-                                        col_sstd.append(1.0)
-                              if population == "obsw":
-                                   try:
-                                        col_wmean.append(col_wmean[-1])
-                                        col_wstd.append(col_wstd[-1])
-                                   except:
-                                        col_wmean.append(1.0)
-                                        col_wstd.append(1.0)
-               #data is calculated, now analyze
-               #convert to np array
+                         bin_resmean = np.nanmean(res_bin)
+                         #get std from entire population
+                         if population == "all":
+                              col_res.append(bin_resmean)
+                              col_std.append(np.nanstd(input_data_bin))
+                         #mean of obsss
+                         if population == "obss":
+                              col_smean.append(np.nanmean(input_data_bin))
+                              col_sstd.append(np.nanstd(input_data_bin))
+                         #mean of obsw
+                         if population == "obsw":
+                              col_wmean.append(np.nanmean(input_data_bin))
+                              col_wstd.append(np.nanstd(input_data_bin))
+               #convert lists to np array
                binstd = np.array(col_std)
                binres = np.array(col_res)
                mean_sval = np.array(col_smean)
                std_sval = np.array(col_sstd)
                mean_wval = np.array(col_wmean)
                std_wval = np.array(col_wstd)
+               print "     FITTING RESOLUTION DEPENDENT SPLINE FUNCTIONS",column
                #take bin mean as average of s and w populations (centers data)
                binmean = np.divide(mean_wval + mean_sval,2.0)
                mean_spline_coeff = self.spline4k_fit(binres,binmean,augment=True)
                #sig must be positive, fit log sigma
                log_sig_spline_coeff = self.spline4k_fit(binres,np.log(binstd),augment=True)
                scales_dict[column] = (tuple(mean_spline_coeff),tuple(log_sig_spline_coeff))
-               print "MEAN SPLINE",column,mean_spline_coeff
-               print "logSIG SPLINE",column,log_sig_spline_coeff
 
                #plotting functions to test fit
                if plot:
-                    sub = gridplot.add_subplot(8,5,index+1)
+                    sub = gridplot.add_subplot(4,5,index+1)
                     plot_xval = np.linspace(0.5,5.0,100)
                     mean_plot_spline = self.spline4k(mean_spline_coeff,plot_xval)
                     sig_plot_spline = np.exp(self.spline4k(log_sig_spline_coeff,plot_xval))
-                    plt.title(column)
+                    sub.text(0.9,0.9,"%s" % column,verticalalignment='bottom',horizontalalignment='right',
+                             transform=sub.transAxes,fontsize=12)
+                    sub.set_xlim([0.5,5.0])
                     sub.plot(plot_xval,mean_plot_spline,'k-')
                     sub.plot(plot_xval,sig_plot_spline,'c-')  
                     sub.scatter(binres,mean_wval,color='blue')
                     sub.scatter(binres,mean_sval,color='red')
                     sub.scatter(binres,binmean,color='black')
                     sub.scatter(binres,binstd,color='cyan')
-                    sub = gridplot.add_subplot(8,5,index+21)
+                    ax2=sub.twinx()
                     sn=np.divide((np.power(np.subtract(mean_sval,mean_wval),2)),binstd**2)
-                    plt.title(column)
-                    sub.scatter(binres,sn,color='green')
+                    ax2.set_ylim([0.0,np.clip(np.amax(sn),2.0,20.0)])
+                    ax2.plot(binres,sn,color='green')
           if plot:
                if post_pca:
                     figname = "PCA_resfit.png"
@@ -302,10 +200,6 @@ class TrainingFunctions:
                plt.clf()
                plt.close()
 
-          
-
-
-
           if post_pca:
                filename = "pprobe_post_pca_resscales.dict"
           else:
@@ -314,165 +208,184 @@ class TrainingFunctions:
           f.write(str(scales_dict))
           f.close()
 
+
      def calc_res_pca(self,norm_data,plot=False):
           """
-          calculates resolution dependent PCA matrices binwise
+          Calculates resolution dependent PCA modal matrices binwise
+          1) calculate a reference modal using all data
+          2) calculate modal matricies by resolution bin
+          3) fit outputs vs. resolution by splines
           """
+          print "CALCULATING RESOLUTION DEPENDENT PCA MATRIX COEFFICIENTS"
           selectors = self.ppsel(norm_data)
           res = norm_data['res']
           col_list = selectors.std_view_col
           view_dtype = selectors.std_view_dtype
           #select numerical data
           selected_data = norm_data[col_list].view(selectors.raw_dtype)
-          #calculate covariance
-          cov_data = np.cov(selected_data[:],rowvar=False)
-          #calculate PCA eigvect,eigval for entire datablock for reference
-          pca_total_val,pca_total_vect = np.linalg.eigh(cov_data)
-          #sorted indices of eigenvalues, high to low
-          pca_total_argsort = np.argsort(pca_total_val)[::-1]
-          #reference array of sorted eigenvectors (all data)
-          ref_pca = pca_total_vect.T[pca_total_argsort]
+          total_modal = self.modal_matrix(selected_data,verbose=True)
 
           #calculte PCA components in chunks by resolution, or by size/bin
-          data_size = selected_data.shape[0]
-          resbins = 20
-          resmin = RESMIN
-          resmax=RESMAX
-          #divide resolution into bins
-          resblocks = np.linspace(resmin,resmax,resbins)
-          eig_data = []
-          binres = []
-          for sbin_size in (500,):
-               bin_mask,num_bins = self.calc_res_bins(norm_data,sbin_size)
-               for overlap_bin in np.arange(0,num_bins+1,2):
-                    ressel = np.logical_or(bin_mask == overlap_bin,bin_mask == (overlap_bin + 1))
-                    databin = selected_data[ressel]
-                    res_block=res[ressel]
-                    print "CALC EIGv for DATABIN",overlap_bin,np.amin(res_block),np.amax(res_block),np.nanmean(res_block)
-                    bincov = np.cov(databin.T)
-                    eigval,eigvect = np.linalg.eigh(bincov)
-                    binpca_argsort = np.argsort(eigval)[::-1]
-                    eig_data.append(eigvect.T[binpca_argsort])
-                    #get resolutions for each databin
-                    resmean = np.nanmean(res_block)
-                    binres.append(resmean)
+          #generate binw a minimum number of sulfate and a target minimum resolution width
+          bin_mask,num_bins = self.calc_res_bins(norm_data,20,target_res_bin_width=0.04)
+          eig_data,binres_vals = self.pca_by_bin(selected_data,res,bin_mask,num_bins,plot=True)
 
-          #creates a 3d array, x is resolution slice, y and z are binwise eigenvectors matrix
-          input_pca = np.array(eig_data)
-          #next, orient each bin of PCA eigenvectors
-          #first eigv is aligned to reference PCA set
-          oriented_pca = np.zeros(input_pca.shape)
-          #iterate by resolution
-          for pcabin,pca_comp in enumerate(input_pca):
+          #initialize empty 3d array for sorted/oriented modal matrices
+          oriented_pca = np.zeros(eig_data.shape)
+
+          #iterate by resolution bin (first index)
+          for pcabin,bin_modal in enumerate(eig_data):
                #reference is initially the PCA xfrom of entire dataset
                if pcabin == 0:
-                    ref_fit = ref_pca
-               #initialze a matrix, same size as the cov matrix
-               new_pca = np.zeros(pca_comp.shape)
-               #pool of vectors from which to pick "best" eigenvector by matching to reference pca set
-               vector_pool = pca_comp
-               #boolean mask array 
-               selbool = np.ones(pca_comp.shape[1],dtype=np.bool_)
-               #iterate through eigenvectors
-               for index in np.arange(pca_comp.shape[1]):
-                    ref_vect = ref_fit[index]
-                    dotvect = np.zeros(vector_pool.shape[0])
-                    #get dot product for each each eigenvector and the reference vector (abs)
-                    for eigind,eigv in enumerate(vector_pool):
-                         #absolute value gives best co-linearity in either orientation
-                         dotvect[eigind] = np.abs(np.dot(ref_vect,eigv))
-                         #gives best fit only in as given orientations
-                         #dotvect[eigind] = np.dot(orig_ref[index],eigv)
-                    #find the largest dot product (sort plus/minus later)
-                    print "DOTS",dotvect
-                    best_ind = np.argmax(dotvect)
-                    print "REFV",ref_vect
-                    print "BEST",vector_pool[best_ind],best_ind
-                    new_pca[index] = vector_pool[best_ind]
-                    selbool[best_ind] = False
-                    #eliminate the used vector from the pool
-                    vector_pool = vector_pool[selbool]
-                    selbool = selbool[selbool]
-                    #"flip" eigenvectors that are reversed w.r.t the reference vector
-                    dotprod = np.dot(new_pca[index],ref_vect)
-                    if dotprod < 0:
-                         print "FLIPr",dotprod,ref_vect
-                         print "FLIPb",dotprod,new_pca[index]
-                         new_pca[index] = np.multiply(new_pca[index],-1.0)
-                    #print "FLIPn",np.dot(new_pca[index],ref_vect),new_pca[index]
-                    ref_vect = new_pca[index]
-               oriented_pca[pcabin] = new_pca
-               #set the reference pca array to current to enforce smoothness
-               ref_fit = new_pca.copy()
+                    ref_modal = total_modal
+               new_modal = self.eig_sort(ref_modal,bin_modal,verbose=True)
+               oriented_pca[pcabin] = new_modal
+               #once first bin set, reference is previous window to enforce smoothing
+               ref_modal = new_modal
+
 
           #fit the resolution dependent PCA components to a usual spline function
-          #does outlier exclusion
+          #initialize output, shape of modal with 6 coefficients for each element
           pca_coeffs = np.zeros((oriented_pca.shape[1],oriented_pca.shape[2],6))
-          for eigvect in np.arange(oriented_pca.shape[1]):
+          for modal_j in np.arange(oriented_pca.shape[2]):
+               print "     FITTING EIGv %2s COMPONENTS" % modal_j
                if plot:
                     gridplot = plt.figure(figsize=(24,8))
-               for component in np.arange(oriented_pca.shape[2]):
-                    xval = np.array(binres)
-                    yval = np.array(oriented_pca[:,eigvect,component])
-                    print "FITTING EIGv Component",eigvect,component
-                    pca_coeffs[eigvect,component,:] = self.spline4k_fit(xval,yval,augment=True)
-                    #reject 3 worst outliers, testing training  
-                    #residuals = (yval - self.spline4k(pca_coeffs[eigvect,component,:],xval))**2
-                    #exclude_worst3 = np.argsort(residuals)[0:-3]
+               for modal_i in np.arange(oriented_pca.shape[1]):
+                    xval = binres_vals
+                    #slice by first index (resolution)
+                    yval = np.array(oriented_pca[:,modal_i,modal_j])
+                    pca_coeffs[modal_i,modal_j,:] = self.spline4k_fit(xval,yval,augment=True)
+                    #reject single worst outlier, testing training  
+                    residuals = (yval - self.spline4k(pca_coeffs[modal_i,modal_j,:],xval))**2
+                    exclude_worst_point = np.argsort(residuals)[0:-1]
                     #reject bad points (testing/training)
-                    #xval = xval[exclude_worst3]
-                    #yval = yval[exclude_worst3]
-                    pca_coeffs[eigvect,component,:] = self.spline4k_fit(xval,yval,augment=True)
+                    xval = xval[exclude_worst_point]
+                    yval = yval[exclude_worst_point]
+                    pca_coeffs[modal_i,modal_j,:] = self.spline4k_fit(xval,yval,augment=True)
 
                     #plotting functions
                     if plot:
                          fitxval = np.linspace(0.5,5.0,100)
-                         fityval = self.spline4k(pca_coeffs[eigvect,component,:],fitxval)
-                         sub = gridplot.add_subplot(4,5,component+1)
-                         plt.title(component)
+                         fityval = self.spline4k(pca_coeffs[modal_i,modal_j,:],fitxval)
+                         sub = gridplot.add_subplot(4,5,modal_i+1)
+                         sub.text(0.1,0.8,"%s" % modal_i,verticalalignment='bottom',horizontalalignment='right',
+                                  transform=sub.transAxes,fontsize=12)
                          sub.set_xlim([0.5,5.0])
+                         maxval=np.amax(np.absolute(yval))
+                         plot_ylim = np.clip(maxval,1.0,np.inf)
+                         sub.set_ylim([-plot_ylim,plot_ylim])
                          sub.scatter(xval,yval)
                          sub.plot(fitxval,fityval)
                          #add line to indicate total pca value
-                         sub.plot((0.5,5.0),(ref_pca[eigvect,component],ref_pca[eigvect,component]))
+                         sub.plot((0.5,5.0),(total_modal[modal_i,modal_j],total_modal[modal_i,modal_j]))
                if plot:
-                    plt.savefig("PCA_eigv_reject_fits_"+str(eigvect)+".png")
+                    plt.savefig("PCA_eigv_reject_fits_"+str(modal_j)+".png")
                     plt.clf()
                     plt.close()
+
           #store coeffs in a dictionary and write
           pca_coeffs_dict = {}
           for i in range(pca_coeffs.shape[0]):
                for j in range(pca_coeffs.shape[1]):
                     pca_coeffs_dict[str(i)+"_"+str(j)] = tuple(pca_coeffs[i,j])
           f = open("pprobe_pca_matrix_coeff.dict",'w')
+          print "WRITING PCA COEFFICIENTS"
           f.write(str(pca_coeffs_dict))
           f.close()
 
-     def calc_res_bins(self,data_array,so4_per_bin):
+
+     def check_decorr(self,norm_data,pca_data,plot=False):
+          print "CHECKING DECORRELATIONS"
+          selectors = self.ppsel(norm_data)
+          res = pca_data['res']
+          n_col_list = selectors.std_view_col
+          p_col_list = selectors.pca_view_col
+          #select numerical data
+          selected_norm_data = norm_data[n_col_list].view(selectors.raw_dtype)
+          selected_pca_data = pca_data[p_col_list].view(selectors.raw_dtype)
+          bin_mask,num_bins = self.calc_res_bins(pca_data,20,target_res_bin_width=0.04)
+          for resbin in np.arange(num_bins + 1):
+               ressel = np.logical_and(bin_mask >= resbin,bin_mask <= resbin)
+               n_databin = selected_norm_data[ressel]
+               p_databin = selected_pca_data[ressel]
+               res_block=res[ressel]
+               #untransformed data transformed locally
+               block_n_corr = np.corrcoef(n_databin.T)
+               block_modal = np.linalg.svd(block_n_corr)[0]
+               block_n_xform = np.dot(n_databin,block_modal)
+               block_np_corr = np.corrcoef(block_n_xform.T)
+
+               #data transformed by fitted modal matrix
+               block_p_corr = np.corrcoef(p_databin.T)
+               calc_modal = self.gen_xform_mat(np.nanmean(res_block))
+
+               #transformation regeneration
+               pcov = np.dot(n_databin,p_databin.T)
+               xform1_modal = np.linalg.svd(pcov)[0]
+               block_modal_sort = self.eig_sort(calc_modal,block_modal)
+               print "DECORR FOR BIN",resbin,res_block[0],res_block[-1]
+               print "INPUT CORR"
+               print block_n_corr
+               print "INPUT XCORR"
+               print block_np_corr
+               print "OUTPUT CORR"
+               print block_p_corr
+               print "FITTED MODAL"
+               print calc_modal
+               print "LOCAL MODAL"
+               print block_modal_sort
+               print "NORM F-L",np.linalg.norm(np.subtract(calc_modal,block_modal_sort))
+               q,r = np.linalg.qr(calc_modal)
+               print "QR-R NORM SCALED",np.linalg.norm(r) - np.sqrt(len(n_col_list))
+
+
+     def calc_res_bins(self,data_array,min_so4_per_bin,target_res_bin_width=0.075):
           #bins data, returns integer array mask
-          #input data should be sorted by resolution
+          #input data must be sorted by resolution
+          #if fastmode set, binsizes increased for faster calculations
+          if self.fastmode:
+               min_so4_per_bin = min_so4_per_bin*5
+               target_res_bin_width = target_res_bin_width*5 
+          selectors = self.ppsel(data_array)
           array_size = data_array.shape[0]
           bin_mask=np.zeros(array_size,dtype=np.int16)
           binno = 0
-          count = 0
-          #start from the high(low) res end
+          scount = 0
+          tot_count = 0
+          reswidth = 0.0
+          binres_max = data_array['res'][-1]
+          binres_min = 0.0
+          #start from the high(low) res, change bin number
+          #once min_so4 counts is reached and target bin width reached
           for index,ori in enumerate(data_array['ori'][::-1]):
                bin_mask[index] = binno
+               tot_count = tot_count + 1
                if ori == "SO4" or ori == "PO4":
-                    count = count + 1
-               if count == so4_per_bin:
-                    count = 0
+                    scount = scount + 1
+                    binres_min = data_array['res'][-index]
+                    reswidth = binres_max - binres_min
+               if scount >= min_so4_per_bin and reswidth >= target_res_bin_width:
+                    #print "BIN FULL",binno,scount,tot_count,binres_max,binres_min,reswidth
+                    scount = 0
                     binno = binno + 1
-          #flip array as we started at the end
+                    binres_max = data_array['res'][-index]
+               if index == array_size -1:#hit the end of the array
+                    #group last two (highest res) bins together
+                    binno = binno -1
+                    bin_mask[bin_mask == binno] = binno
+                    #print "LAST BIN ADDED TO PREVIOUS",binno,scount,tot_count,binres_max,binres_min,reswidth
+
+          #flip array as we started at the end, then flip bin numbers from best res to worst
           bin_mask = np.flipud(bin_mask)
+          bin_mask = binno - bin_mask
+          print "DATA BINNING"
           for i in range(binno + 1):
-               binsize = np.count_nonzero(data_array['res'][bin_mask == i])
-               print "BIN %s SIZE %s RES %s" % (i,binsize,np.nanmean(data_array['res'][bin_mask == i]))
+               binsize = np.count_nonzero(bin_mask == i)
+               no_so4 = np.count_nonzero(np.logical_and(selectors.inc_obss_bool,bin_mask==i))
+               binres = np.nanmean(data_array['res'][bin_mask == i])
+               print "    BIN %3s SIZE %7s SO4 %6s RES %4.2f" % (i,binsize,no_so4,binres)
           return bin_mask,binno
-
-               
-          
-
 
      def calc_jsu_coeff(self,data_array,plot=False):
           """
@@ -482,6 +395,7 @@ class TrainingFunctions:
           then calculates a function to fit the coefficients of the distribution
           as a function of resolution
           """
+          print "FITTING TRANSFORMED DATA TO Jsu DISTRIBUTIONS"
           selectors = self.ppsel(data_array)
           if plot:
                gridplot_s = plt.figure(figsize=(24,8))
@@ -493,32 +407,18 @@ class TrainingFunctions:
           wfit_data = []
           res = data_array['res']
           data_size = data_array.shape[0]
-          resmin = RESMIN
-          resmax=RESMAX
           #divide resolution into bins
-          #resblocks = np.linspace(resmin,resmax,resbins)
-          #ad hoc resolution bins to keep bins large
-          resblocks = np.array((resmin,1.2,1.4,1.7,2.0,2.3,2.5,2.7,2.9,3.1,3.3,5.0))
-          bin_mask,num_bins = self.calc_res_bins(data_array,500)
-          for index,i in enumerate(range(num_bins + 1)):
-               #ressel = selectors.reso_select_mask(data_array,i,resblocks[index+1])
-               ressel = bin_mask == i
-               binav = np.nansum(res[ressel])
+          bin_mask,num_bins = self.calc_res_bins(data_array,50,target_res_bin_width=0.075)
+          for resbin in np.arange(num_bins + 1):
+               #group 4 bins together for rolling window
+               ressel = np.logical_and(bin_mask >= resbin,bin_mask <= resbin+3)
                selected_data = data_array[ressel]
-               print "FITTING JSU PEAKS",selected_data.shape[0],i,binav
+               print "     FITTING JSU HISTOGRAM FOR BIN %.2f %.2f" % (selected_data['res'][0],
+                                                                       selected_data['res'][-1])
                sfit_list,wfit_list,res_list = self.pop_fit_jsu(selected_data,plot=plot)
                res_data.append(res_list)
                sfit_data.append(sfit_list)
                wfit_data.append(wfit_list)
-               if i == resblocks[-2]:
-                    res_data.append(res_list)
-                    sfit_data.append(sfit_list)
-                    wfit_data.append(wfit_list)
-
-          #each list is the jsu coefficients for each column of data
-          #repeat the last points at 4.0A to avoid excessive extrapolation
-          #there isn't much data in this range
-          #convert lists to np arrays
           all_res_data=np.array(res_data)
           all_sfit_data=np.array(sfit_data)
           all_wfit_data=np.array(wfit_data)
@@ -611,17 +511,18 @@ class TrainingFunctions:
                sn=((s_means-w_means)**2)/(s_var + w_var)
                sn_sum=sn_sum+sn
                sub = gridplot.add_subplot(4,5,index+1)
-               #sub.set_ylim([0,8])
+               sub.set_ylim([0.0,np.clip(np.amax(sn),2.0,np.inf)])
                sub.plot(xplot,sn)
                sub.set_title("SN_"+str(index))
           sub=gridplot.add_subplot(4,5,20)
           #total SN as addition?
           sub.plot(xplot,sn_sum)
-          #sub.set_ylim([0,8])
           gridplot.savefig("sn_plot.png")
           plt.close()
 
      def pop_fit_jsu(self,data_array,plot=False):
+          #fits a batch of data containing both so4 and water
+          #to JSU distributions, is passed one "bin" of data by resolution
           selectors = self.ppsel(data_array)
           obss_sel=selectors.inc_obss_bool
           obsw_sel=selectors.inc_obsw_bool
@@ -633,20 +534,22 @@ class TrainingFunctions:
           wfit_list = []
           res_list = []
           #adjust histogram binning for size of dataset
-          bins = np.clip(int(data_array.shape[0]/10),20,150)
+          no_so4 = np.count_nonzero(obss_sel)
+          no_wat = np.count_nonzero(obsw_sel)
+
           for index,column in enumerate(col_list):
                input_column=data_array[column]
                #set sensible histogram limits
-               smean = np.nanmean(input_column[obss_sel])
-               sstd =  np.nanstd(input_column[obss_sel])
-               wmean = np.nanmean(input_column[obsw_sel])
-               wstd =  np.nanstd(input_column[obsw_sel])
-               slow = smean - 3.0*sstd
-               wlow = wmean - 3.0*wstd
-               shigh = smean + 3.0*sstd
-               whigh = wmean + 3.0*wstd
-               obss_hist,obss_bins = np.histogram(input_column[obss_sel],bins=bins,density=True,range=(slow,shigh))
-               obsw_hist,obsw_bins = np.histogram(input_column[obsw_sel],bins=bins,density=True,range=(wlow,whigh))
+               slow = np.percentile(input_column[obss_sel],0.5)
+               wlow = np.percentile(input_column[obsw_sel],0.5)
+               shigh = np.percentile(input_column[obss_sel],99.5)
+               whigh = np.percentile(input_column[obsw_sel],99.5)
+               sbinw = np.nanstd(input_column[obss_sel])*np.power(42.5/no_so4,0.33)
+               wbinw = np.nanstd(input_column[obsw_sel])*np.power(42.5/no_wat,0.33)
+               sbins = np.clip(int((shigh-slow)/sbinw),20,100)
+               wbins = np.clip(int((whigh-wlow)/wbinw),20,100)
+               obss_hist,obss_bins = np.histogram(input_column[obss_sel],bins=sbins,density=True,range=(slow,shigh))
+               obsw_hist,obsw_bins = np.histogram(input_column[obsw_sel],bins=wbins,density=True,range=(wlow,whigh))
                #calculates average of bin edges for fitting
                sfit = self.fit_jsu(((obss_bins[:-1] + obss_bins[1:]) / 2.0),obss_hist)
                wfit = self.fit_jsu(((obsw_bins[:-1] + obsw_bins[1:]) / 2.0),obsw_hist)
@@ -657,15 +560,86 @@ class TrainingFunctions:
                if plot: 
                     xdata=np.linspace(np.amin((slow,wlow))-1.0,np.amax((shigh,whigh))+1.0,100)
                     sub = gridplot.add_subplot(4,5,index+1)
+                    splot_bins = obss_hist.shape[0]
+                    wplot_bins = obsw_hist.shape[0]
                     sub.plot(xdata,self.johnsonsu_pdf(xdata,sfit[0],sfit[1],sfit[2],sfit[3]),'r-')
                     sub.plot(xdata,self.johnsonsu_pdf(xdata,wfit[0],wfit[1],wfit[2],wfit[3]),'b-')
-                    sub.hist(input_column[obss_sel], normed=True, bins=bins,range=(slow,shigh),color="red")
-                    sub.hist(input_column[obsw_sel], normed=True, bins=bins,range=(wlow,whigh),color="blue")
-
+                    sub.hist(input_column[obss_sel], normed=True, bins=splot_bins,range=(slow,shigh),color="red",alpha=0.5)
+                    sub.hist(input_column[obsw_sel], normed=True, bins=wplot_bins,range=(wlow,whigh),color="blue",alpha=0.5,)
+                    sub.text(0.2,0.8,"%s" % column,verticalalignment='bottom',horizontalalignment='right',
+                             transform=sub.transAxes,fontsize=12)
+                    sstat = self.johnsonsu_stats(sfit)
+                    wstat = self.johnsonsu_stats(wfit)
+                    sub.text(0.95,0.85,"%.1f %.2f" % (sstat[0],np.sqrt(sstat[1])),verticalalignment='bottom',
+                             horizontalalignment='right',transform=sub.transAxes,fontsize=12,color='red')
+                    sub.text(0.95,0.75,"%.1f %.2f" % (wstat[0],np.sqrt(wstat[1])),verticalalignment='bottom',
+                             horizontalalignment='right',transform=sub.transAxes,fontsize=12,color='blue')
+                    sub.text(0.95,0.65,"%.2f %.2f %.2f %.2f" % tuple(sfit),verticalalignment='bottom',
+                             horizontalalignment='right',transform=sub.transAxes,fontsize=10,color='red')
+                    sub.text(0.95,0.55,"%.2f %.2f %.2f %.2f" % tuple(wfit),verticalalignment='bottom',
+                             horizontalalignment='right',transform=sub.transAxes,fontsize=10,color='blue')
           if plot:
                plt_str = str(res_list[-1])[0:4]
                plt.savefig("JSU_FITS_"+plt_str+".png")
                plt.clf()
                plt.close()
           return sfit_list,wfit_list,res_list     
+                           
+          
+     def population_dist_stats(self,data_array):
+          selectors = self.ppsel(data_array)
+          gridplot = plt.figure(figsize=(24,16))
+          res = data_array['res']
+          col_names=selectors.pca_view_col
+          res_list,smean_list,wmean_list,sstd_list,wstd_list = [],[],[],[],[]
+          jsu_smean_list,jsu_sstd_list,jsu_wmean_list,jsu_wstd_list = [],[],[],[]
+          bin_mask,num_bins = self.calc_res_bins(data_array,50,target_res_bin_width=0.075)
+          for index,column in enumerate(col_names):         
+               res_list,smean_list,wmean_list,sstd_list,wstd_list = [],[],[],[],[]
+               jsu_smean_list,jsu_sstd_list,jsu_wmean_list,jsu_wstd_list = [],[],[],[]
+               input_data = data_array[column]
+               for i in np.arange(num_bins + 1):
+                    input_data_bin=input_data[bin_mask == i]
+                    ssel = selectors.inc_obss_bool[bin_mask==i]
+                    wsel = selectors.inc_obsw_bool[bin_mask==i]
+                    res_bin=res[bin_mask == i]
+                    bin_resmean = np.nanmean(res_bin)
+                    res_list.append(bin_resmean)
+                    smean_list.append(np.nanmean(input_data_bin[ssel]))
+                    wmean_list.append(np.nanmean(input_data_bin[wsel]))
+                    sstd_list.append(np.nanstd(input_data_bin[ssel]))
+                    wstd_list.append(np.nanstd(input_data_bin[wsel]))
+                    s_pdf_coeff,w_pdf_coeff=self.get_jsu_coeffs(index,bin_resmean)
+                    sstats = self.johnsonsu_stats(s_pdf_coeff)
+                    wstats = self.johnsonsu_stats(w_pdf_coeff)
+                    jsu_smean_list.append(sstats[0])
+                    jsu_sstd_list.append(np.sqrt(sstats[1]))
+                    jsu_wmean_list.append(wstats[0])
+                    jsu_wstd_list.append(np.sqrt(wstats[1]))
+               sub = gridplot.add_subplot(4,5,index+1)
+               xval = np.array(res_list)
+               smean = np.array(smean_list)
+               wmean = np.array(wmean_list)
+               sstd = np.array(sstd_list)
+               wstd = np.array(wstd_list)
+               sjmean = np.array(jsu_smean_list)
+               wjmean = np.array(jsu_wmean_list)
+               sjstd = np.array(jsu_sstd_list)
+               wjstd = np.array(jsu_wstd_list)
+               sub.plot(xval,smean,'r-')
+               sub.plot(xval,wmean,'b-')
+               sub.plot(xval,sstd,'m-')
+               sub.plot(xval,wstd,'c-')
+               sub.scatter(xval,sjmean,color='red',alpha=0.5)
+               sub.scatter(xval,wjmean,color='blue',alpha=0.5)
+               sub.scatter(xval,sjstd,color='magenta',alpha=0.5)
+               sub.scatter(xval,wjstd,color='cyan',alpha=0.5)
+               total_means = [np.nanmean(x) for x in (smean,sjmean,sstd,sjstd,wmean,wjmean,wstd,wjstd)]
+               print "MEANS COLUMN S jS sS jsS W jW sW sjW",column,list('{:.2f}'.format(x) for x in total_means)
+               
 
+          plt.savefig("compare_stats.png")
+          plt.clf()
+          plt.close()
+
+               
