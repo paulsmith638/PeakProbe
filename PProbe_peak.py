@@ -123,10 +123,7 @@ class PeakObj:
         volume = 0.0
         solvent_content = self.struct_data.solvent_content
         #sanity check, avoid overcorrection?
-        if solvent_content < 0.2:
-            solvent_content = 0.2
-        if solvent_content > 0.8:
-            solvent_content = 0.8
+        solvent_content = np.clip(solvent_content,0.2,0.8)
 
         #function to correct for solvent content on sigma values
         # Thanks Tom T!  Assuming near zero variance in solvent region,

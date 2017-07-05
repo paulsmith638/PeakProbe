@@ -104,8 +104,17 @@ class ClassifierFunctions:
                     column_index=str(i)+"_"+str(j)
                     params = pca_coeffs[column_index]
                     xform_matrix[i,j] = self.spline4k(params,res.reshape(-1))
-          print "     PCA XFORM MATRIX RES %.2f DET %.2f" % (res,np.linalg.det(xform_matrix))
-          return xform_matrix
+          #these regenerated modal matrices are often have det != 1.0 and introduce
+          #strange artifacts into the data
+          #the following trick might work:
+          modal_u,modal_l,modal_v = np.linalg.svd(xform_matrix)
+          modal_fixed = np.dot(modal_u,modal_v)
+          #possibility of reflections?
+          orig_det = np.linalg.det(xform_matrix)
+          fixed_det = np.linalg.det(modal_fixed)
+          eval_sum = np.nansum(modal_l) #should be 3, tr(M), but isn't sometimes
+          print "     PCA XFORM MATRIX RES %.2f DETin %.4f DETout %.4f TRACE %.4f" % (res,orig_det,fixed_det,eval_sum)
+          return modal_fixed
 
 
      def xform_data(self,data,matrix):
@@ -260,8 +269,8 @@ class ClassifierFunctions:
      def initialize_results(self,data_array):
           rows = data_array.shape[0]
           dtype = [('id','S16'),('res','f4'),('score','f4'),('prob','f4'),
-                   ('llgS','f4'),('llgW','f4'),('chiS','f4'),('chiW','f4'),
-                   ('fchi','f4'),('kchi','f4')]
+                   ('llgS','f4'),('llgW','f4'),('chiS','f4'),('chiW','f4'),     
+                   ('fchi','f4'),('kchi','f4'),('rc','i1')]
           return np.zeros(rows,dtype=dtype)
 
      def discriminant_analysis(self,data_array,results_array,plot=False):
@@ -367,7 +376,8 @@ class ClassifierFunctions:
                                          lc0110,lc0101,lc0111,lc0100,lc1010,lc1001,lc1011,lc1000)):
                select = lclass
                result_class[select] = index + 1
-          return result_class
+          results_array['rc'] = result_class
+
 
      def score_class(self,numTP,numTN,numFP,numFN):
           count = float(numTP+numTN+numFP+numFN)
@@ -397,7 +407,9 @@ class ClassifierFunctions:
           if plot:
                gridplot = plt.figure(figsize=(12,12))
                plot_data = []
-          result_class = self.score_breakdown(data_array,results_array)
+          self.score_breakdown(data_array,results_array)
+          result_class = results_array['rc']
+
 
           for resbin in range(10):
                if resbin == 0: #all data
@@ -412,38 +424,44 @@ class ClassifierFunctions:
                if count < 10: #not enough data in bin
                     plot_data.append([0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0])
                     break
-               tpsel = np.logical_and(selected_class > 0,selected_class <=4)
-               tnsel = np.logical_and(selected_class > 4,selected_class <=8)
-               fpsel = np.logical_and(selected_class > 8,selected_class <=12)
-               fnsel = np.logical_and(selected_class > 12,selected_class <=16)
                counts = []
                for rclass in np.arange(1,17,1):
                     counts.append(np.count_nonzero(selected_class == rclass))
 
                
                print "STATS FOR BIN %1s PEAKS %8s" % (resbin,count)
-               tp,tn,fp,fn = np.nansum(np.array(counts).reshape((4,4)),axis=1)
-               acc,ppv,npv,rec,f1 = self.score_class(tp,tn,fp,fn)
-               ftp,ftn,ffp,ffn = np.array((tp,tn,fp,fn))/float(count)
-               print "    ALL DATA   TP %5s(%4.3f) TN %5s(%4.3f) FP %5s(%4.3f) FN %5s(%4.3f)" % (tp,ftp,tn,ftn,fp,ffp,fn,ffn)
-               print "               ACC %4.3f       PPV %4.3f       NPV %4.3f       REC %4.3f        F1 %4.3f" % (acc,ppv,npv,rec,f1)
-               print "        RC: ", "".join('{:5d}'.format(x) for x in np.arange(1,17,1))
-               print "            ", "".join('{:5d}'.format(x) for x in counts)
-               print ""
-               if plot:
-                    plot_data.append(counts)
+               for index,s_class in enumerate(('ALL_DAT','POS_LLG')):
+                    res_arr =np.array(counts).reshape((4,4)) 
+                    if index == 0:
+                         tp,tn,fp,fn = np.nansum(res_arr,axis=1)
+                         count = np.nansum(res_arr)
+                    else:
+                         #remove classes with bad scores for both 4,8,12,16               
+                         res_arr[:,-1] = np.zeros(4)
+                         tp,tn,fp,fn = np.nansum(res_arr,axis=1) 
+                         count = np.nansum(res_arr)
+                    acc,ppv,npv,rec,f1 = self.score_class(tp,tn,fp,fn)
+                    ftp,ftn,ffp,ffn = np.array((tp,tn,fp,fn))/float(count)
+                    print "    %s   TP %5s(%4.3f) TN %5s(%4.3f) FP %5s(%4.3f) FN %5s(%4.3f)" % (s_class,tp,ftp,tn,ftn,fp,ffp,fn,ffn)
+                    print "               ACC %4.3f    PPV %4.3f    NPV %4.3f    REC %4.3f        F1 %4.3f" % (acc,ppv,npv,rec,f1)
+                    print "      RC: ", " ".join('{:5d}'.format(x) for x in np.arange(1,17,1))
+                    print "          ", " ".join('{:5d}'.format(x) for x in res_arr.reshape(-1))
+                    print ""
+
+                    if plot:
+                         plot_data.append((acc,ppv,npv,rec,f1))
           if plot:
                plot_data = np.array(plot_data)
-               bincounts = np.nansum(plot_data,axis=1)
-               nplot_data = np.divide(plot_data,bincounts[:,None])
-               for rclass in np.arange(1,17,1):
-                    sub = gridplot.add_subplot(4,4,rclass)
-                    bar_data = nplot_data[:,rclass-1]
-                    sub.bar(np.arange(10),bar_data,align='center',alpha=0.5)
-                    sub.set_xticks(np.arange(10))
-                    sub.set_xticklabels(np.arange(10))
-                    sub.set_title("RC_"+str(rclass))
-               plt.savefig("SCORE_DIST.png")
+               for rbin in np.arange(10):
+                    sub = gridplot.add_subplot(5,2,rbin+1)
+                    bar_data1 = plot_data[2*rbin]
+                    bar_data2 = plot_data[2*rbin+1]
+                    sub.bar(np.arange(5)-0.2,bar_data1,width=0.2,align='center',color='r')
+                    sub.bar(np.arange(5),bar_data2,width=0.2,align='center',color='b')
+                    sub.set_xticks(np.arange(5))
+                    sub.set_xticklabels(['ACC','PPV','NPV','REC','F1b'])
+                    sub.set_ylabel("BIN_"+str(rbin))
+               plt.savefig("SCORE_PLOT.png")
                plt.clf()
                plt.close()
 

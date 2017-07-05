@@ -26,7 +26,7 @@ from  PProbe_ref import RSRefinements
 from PProbe_util import Util
 
 class RealSpace:
-    def __init__(self,peak_object,ref_object,ressig=False):
+    def __init__(self,peak_object,ref_object,features_dict,ressig=False):
         """
         Class for realspace refinement operations (see PProbe_ref for cctbx refinement routines)
         Various RSR operations are done with results (correlation coefficients, input and output structures, etc.,
@@ -34,7 +34,7 @@ class RealSpace:
         peak_object = contains coordinates and maps
         ref_ofject = methods for working with maps 
         """
-        self.features = {}
+        self.features = features_dict
         #unbound methods for rsr and cc
         self.rsrefine = ref_object.refine_rsr
         self.calc_rscc = ref_object.calculate_cc

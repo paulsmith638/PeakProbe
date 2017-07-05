@@ -159,6 +159,7 @@ class PProbeTasks:
         pca_scaled_data = ppcf.standardize_data(pca_data,post_pca=True)
         results_array = ppcf.initialize_results(pca_scaled_data)
         ppcf.discriminant_analysis(pca_scaled_data,results_array,plot=False)
+        ppcf.score_breakdown(pca_scaled_data,results_array)
         return results_array
 
         

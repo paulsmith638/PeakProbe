@@ -159,7 +159,8 @@ class RejectFunctions:
           cfunc = ppclas(verbose=True)
           if plot:
                gridplot = plt.figure(figsize=(64,24),tight_layout=True)
-          results_class = self.score_breakdown(data_array,results_array)
+          self.score_breakdown(data_array,results_array)
+          results_class = results_array['rc']
           tpsel = np.logical_and(results_class > 0,results_class <=4)
           tnsel = np.logical_and(results_class > 4,results_class <=8)
           fpsel = np.logical_and(results_class > 8,results_class <=12)
@@ -217,7 +218,7 @@ class RejectFunctions:
                                    for subselect,color in zip((1,2,3,4),('r','b','g','y')):
                                         subdata = statcol[(sub_class-1) % 4 == subselect-1]
                                         if subdata.shape[0] > 0:
-                                             sub.hist(subdata,normed=True, stacked=True,bins=bins,range=(plot_xmin,plot_xmax),alpha=0.5,color=color)
+                                             sub.hist(subdata,normed=False, stacked=False,bins=bins,range=(plot_xmin,plot_xmax),alpha=0.5,color=color)
                                              sub.text(0.3+0.1*subselect,0.9,"C%1d" % subselect,verticalalignment='bottom',horizontalalignment='right',
                                                       transform=sub.transAxes,fontsize=12,color=color)
                               if plot_fit:

@@ -67,13 +67,32 @@ class TrainingFunctions:
           #l2 norm on b and scale
           l2 = (b*b)+(scale*scale)
           var_penalty = self.jsu_var(param)
-          return 0.1*var_penalty+l2+100.0*np.sum((yval-self.johnsonsu_pdf(xval,a,b,loc,scale))**2)
+          return 0.05*var_penalty+l2+100.0*np.sum((yval-self.johnsonsu_pdf(xval,a,b,loc,scale))**2)
 
-     def fit_jsu(self,xval,yval):
-          initial = np.array((0.0,1.0,xval[np.argmax(yval)],1.0))
+     def johnsonsu_restarget(self,param,xval,yval,ivals):
+          a,b,loc,scale = param
+          rest = np.nansum((param-ivals)**2) #harmonic restraint
+          var_penalty = self.jsu_var(param)
+          return 0.05*var_penalty+10.0*rest+100.0*np.sum((yval-self.johnsonsu_pdf(xval,a,b,loc,scale))**2)
+
+     def fit_jsu(self,xval,yval,ivals=None,restrain=False):
+          #to enforce smoothness among highly correlated parameters,
+          #pass initial values and restraints
+          #initial values is 4xfloat
+          #if restraints is True, values are restrained to these initial values
+          if ivals is not None:
+               initial = np.array(ivals)
+          else:
+               initial = np.array((0.0,1.0,xval[np.argmax(yval)],1.0))
+          #constraints are absolute
           constraints = np.array([(-999.0,999.0),(0.5,999.0),(-999.0,999.0),(0.05,999.0)])
-          L = op.fmin_l_bfgs_b(self.johnsonsu_target,initial,args=(xval,yval),bounds=constraints,approx_grad=True,disp=False)
-          return L[0]
+          if restrain and ivals is not None:
+               L = op.fmin_l_bfgs_b(self.johnsonsu_restarget,initial,args=(xval,yval,initial),
+                                    bounds=constraints,approx_grad=True,disp=False)
+          else:
+               L = op.fmin_l_bfgs_b(self.johnsonsu_target,initial,args=(xval,yval),
+                                    bounds=constraints,approx_grad=True,disp=False)
+          return L[0] #just return fitted parameters
      
 
      """
@@ -133,7 +152,7 @@ class TrainingFunctions:
           bin_mask,num_bins = self.calc_res_bins(data_array,30,target_res_bin_width=0.075)
           for index,column in enumerate(col_names):
                data_column = data_array[column]
-               col_res,col_smean,col_wmean,col_sstd,col_wstd,col_std = [],[],[],[],[],[]
+               col_res,col_smean,col_wmean,col_sstd,col_wstd,col_std,col_tmean = [],[],[],[],[],[],[]
                for population,selector in zip(('obss','obsw','all'),(selectors.inc_obss_bool,
                                                                      selectors.inc_obsw_bool,
                                                                      selectors.included_data_bool)):
@@ -149,6 +168,7 @@ class TrainingFunctions:
                          if population == "all":
                               col_res.append(bin_resmean)
                               col_std.append(np.nanstd(input_data_bin))
+                              col_tmean.append(np.nanmean(input_data_bin))
                          #mean of obsss
                          if population == "obss":
                               col_smean.append(np.nanmean(input_data_bin))
@@ -159,14 +179,18 @@ class TrainingFunctions:
                               col_wstd.append(np.nanstd(input_data_bin))
                #convert lists to np array
                binstd = np.array(col_std)
+               binmean = np.array(col_tmean)
                binres = np.array(col_res)
                mean_sval = np.array(col_smean)
                std_sval = np.array(col_sstd)
                mean_wval = np.array(col_wmean)
                std_wval = np.array(col_wstd)
+               
                print "     FITTING RESOLUTION DEPENDENT SPLINE FUNCTIONS",column
-               #take bin mean as average of s and w populations (centers data)
-               binmean = np.divide(mean_wval + mean_sval,2.0)
+
+               # after PCA,take bin mean as average of s and w populations (centers data)
+               if post_pca:
+                    binmean = np.divide(mean_wval + mean_sval,2.0)
                mean_spline_coeff = self.spline4k_fit(binres,binmean,augment=True)
                #sig must be positive, fit log sigma
                log_sig_spline_coeff = self.spline4k_fit(binres,np.log(binstd),augment=True)
@@ -310,27 +334,33 @@ class TrainingFunctions:
                n_databin = selected_norm_data[ressel]
                p_databin = selected_pca_data[ressel]
                res_block=res[ressel]
+               calc_modal = self.gen_xform_mat(np.nanmean(res_block))
                #untransformed data transformed locally
                block_n_corr = np.corrcoef(n_databin.T)
-               block_modal = np.linalg.svd(block_n_corr)[0]
+               block_modal,l,v = np.linalg.svd(block_n_corr)
+               block_modal_sort = self.eig_sort(calc_modal,block_modal)
                block_n_xform = np.dot(n_databin,block_modal)
                block_np_corr = np.corrcoef(block_n_xform.T)
-
+               block_ns_xform = np.dot(n_databin,block_modal_sort)
+               block_ns_corr = np.corrcoef(block_ns_xform.T)
                #data transformed by fitted modal matrix
-               block_p_corr = np.corrcoef(p_databin.T)
-               calc_modal = self.gen_xform_mat(np.nanmean(res_block))
 
-               #transformation regeneration
-               pcov = np.dot(n_databin,p_databin.T)
-               xform1_modal = np.linalg.svd(pcov)[0]
-               block_modal_sort = self.eig_sort(calc_modal,block_modal)
+               block_p_corr_asis = np.corrcoef(p_databin.T)
+               rx_p = np.dot(n_databin,calc_modal)
+               rx_pcorr = np.corrcoef(rx_p.T)
+
+
                print "DECORR FOR BIN",resbin,res_block[0],res_block[-1]
                print "INPUT CORR"
                print block_n_corr
-               print "INPUT XCORR"
+               print "INPUT XCORR ASIS"
                print block_np_corr
-               print "OUTPUT CORR"
-               print block_p_corr
+               print "INPUT XCORR SORT"
+               print block_ns_corr
+               print "OUTPUT CORR ASIS"
+               print block_p_corr_asis
+               print "OUTPUT CORR RECALC"
+               print rx_pcorr
                print "FITTED MODAL"
                print calc_modal
                print "LOCAL MODAL"
@@ -409,13 +439,21 @@ class TrainingFunctions:
           data_size = data_array.shape[0]
           #divide resolution into bins
           bin_mask,num_bins = self.calc_res_bins(data_array,50,target_res_bin_width=0.075)
+          swinit = [[],[]] #initialize restraints empty list of two lists
           for resbin in np.arange(num_bins + 1):
-               #group 4 bins together for rolling window
-               ressel = np.logical_and(bin_mask >= resbin,bin_mask <= resbin+3)
+               #using moving window of three bins
+               ressel = np.logical_and(bin_mask >= resbin,bin_mask < resbin+3)
                selected_data = data_array[ressel]
                print "     FITTING JSU HISTOGRAM FOR BIN %.2f %.2f" % (selected_data['res'][0],
                                                                        selected_data['res'][-1])
-               sfit_list,wfit_list,res_list = self.pop_fit_jsu(selected_data,plot=plot)
+               if resbin == 0:
+                    sfit_list,wfit_list,res_list = self.pop_fit_jsu(selected_data,plot=plot)
+                    swinit[0],swinit[1] = sfit_list,wfit_list #store fitted values
+                    print "INITIAL FIT RX0",swinit[0][0],swinit[1][0]
+               else:
+                    sfit_list,wfit_list,res_list = self.pop_fit_jsu(selected_data,swivals=swinit,
+                                                                    restrain=True,plot=plot)
+                    swinit[0],swinit[1] = sfit_list,wfit_list #updated fitted values
                res_data.append(res_list)
                sfit_data.append(sfit_list)
                wfit_data.append(wfit_list)
@@ -520,9 +558,10 @@ class TrainingFunctions:
           gridplot.savefig("sn_plot.png")
           plt.close()
 
-     def pop_fit_jsu(self,data_array,plot=False):
+     def pop_fit_jsu(self,data_array,swivals=None,restrain=False,plot=False):
           #fits a batch of data containing both so4 and water
           #to JSU distributions, is passed one "bin" of data by resolution
+          #use restrained fitting or initial values based on calling routine
           selectors = self.ppsel(data_array)
           obss_sel=selectors.inc_obss_bool
           obsw_sel=selectors.inc_obsw_bool
@@ -540,19 +579,34 @@ class TrainingFunctions:
           for index,column in enumerate(col_list):
                input_column=data_array[column]
                #set sensible histogram limits
-               slow = np.percentile(input_column[obss_sel],0.5)
-               wlow = np.percentile(input_column[obsw_sel],0.5)
-               shigh = np.percentile(input_column[obss_sel],99.5)
-               whigh = np.percentile(input_column[obsw_sel],99.5)
+               slow = np.percentile(input_column[obss_sel],0.1)
+               wlow = np.percentile(input_column[obsw_sel],0.1)
+               shigh = np.percentile(input_column[obss_sel],99.9)
+               whigh = np.percentile(input_column[obsw_sel],99.9)
+               #old formula for calculating binwidth
                sbinw = np.nanstd(input_column[obss_sel])*np.power(42.5/no_so4,0.33)
                wbinw = np.nanstd(input_column[obsw_sel])*np.power(42.5/no_wat,0.33)
+               #divide range by binwidth, clip to reasonable number of points
                sbins = np.clip(int((shigh-slow)/sbinw),20,100)
                wbins = np.clip(int((whigh-wlow)/wbinw),20,100)
                obss_hist,obss_bins = np.histogram(input_column[obss_sel],bins=sbins,density=True,range=(slow,shigh))
                obsw_hist,obsw_bins = np.histogram(input_column[obsw_sel],bins=wbins,density=True,range=(wlow,whigh))
                #calculates average of bin edges for fitting
-               sfit = self.fit_jsu(((obss_bins[:-1] + obss_bins[1:]) / 2.0),obss_hist)
-               wfit = self.fit_jsu(((obsw_bins[:-1] + obsw_bins[1:]) / 2.0),obsw_hist)
+               if swivals:
+                    if restrain:
+                         sfit = self.fit_jsu(((obss_bins[:-1] + obss_bins[1:]) / 2.0),
+                                             obss_hist,ivals=swivals[0][index],restrain=True)
+                         wfit = self.fit_jsu(((obsw_bins[:-1] + obsw_bins[1:]) / 2.0),
+                                             obsw_hist,ivals=swivals[1][index],restrain=True)
+                    else:
+                         sfit = self.fit_jsu(((obss_bins[:-1] + obss_bins[1:]) / 2.0),
+                                             obss_hist,ivals=swivals[0][index],restrain=False)
+                         wfit = self.fit_jsu(((obsw_bins[:-1] + obsw_bins[1:]) / 2.0),
+                                             obsw_hist,ivals=swivals[1][index],restrain=False)
+               else:
+                    sfit = self.fit_jsu(((obss_bins[:-1] + obss_bins[1:]) / 2.0),obss_hist)
+                    wfit = self.fit_jsu(((obsw_bins[:-1] + obsw_bins[1:]) / 2.0),obsw_hist)
+
                sfit_list.append(sfit)
                wfit_list.append(wfit)
                res_list.append(np.nanmean(data_array['res']))

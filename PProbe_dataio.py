@@ -28,7 +28,7 @@ class DataIO:
                                '%3s','%4g','%4g','%8g','%4g','%12s','%1d','%3d','%1d','%4g',
                                '%4g','%4g','%4g','%4g','%4g','%8g']
 
-          self.results_csv_format = ['%12s','%4g','%8g','%8g','%8g','%8g','%8g','%8g','%8g','%8g']
+          self.results_csv_format = ['%12s','%4g','%8g','%8g','%8g','%8g','%8g','%8g','%8g','%8g','%2g']
           self.results_dtype = [('id','S16'),('res','f4'),('score','f4'),('prob','f4'),
                                 ('llgS','f4'),('llgW','f4'),('chiS','f4'),('chiW','f4'),
                                 ('fchi','f4'),('kchi','f4')]

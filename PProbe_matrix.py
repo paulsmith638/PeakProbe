@@ -33,7 +33,7 @@ class PCA:
         if verbose:
             #print "INPUT COV/CORR"
             #print cov_data
-            print "MODAL DETERMINANT", np.linalg.det(modal) #should be 1.0
+            print "      MODAL DETERMINANT", np.linalg.det(modal) #should be 1.0
         return modal
 
     def pca_by_bin(self,input_data,res,bin_mask,num_bins,window=5,plot=False):

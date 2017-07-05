@@ -29,25 +29,32 @@ from PProbe_realspace import RealSpace
 
 class FeatureExtraction:
       def __init__(self):
-           pass
+            pass
 
-      def generate_peak_list(self,pdb_code,peak_pdb_hier):
+      def generate_peak_list(self,pdb_code,peak_pdb_hier,setchain=False,renumber=False):
       #this function takes a list of peaks from a peak search as a pdb
       #and outputs a list of dictionaries with info and coordinates
-          pput = Util()
-          peak_list = []
-          pdb = peak_pdb_hier
-          for model in pdb.models():
-            for chain in model.chains():
-              chainid = chain.id.strip()
-              for resgroups in chain.residue_groups():
-                for atomgroups in resgroups.atom_groups():
-                  for atom in atomgroups.atoms():
-                    resid = resgroups.resseq.strip()
-                    coord = atom.xyz
-                    db_id = pput.gen_db_id(pdb_code,chainid,resid)
-                    peak_list.append(dict(db_id=db_id,resid=resid,chainid=chainid,coord=coord))
-          return peak_list
+      #if chainid is False, original chainids are preserved
+            pput = Util()
+            peak_list = []
+            pdb = peak_pdb_hier
+            for model in pdb.models():
+                  for chain in model.chains():
+                        if setchain:
+                              chainid=setchain
+                        else:
+                              chainid = chain.id.strip()
+                        for resgroups in chain.residue_groups():
+                              for atomgroups in resgroups.atom_groups():
+                                    for atom in atomgroups.atoms():
+                                          if renumber:
+                                                resid=str(len(peak_list) + 1)
+                                          else:
+                                                resid = resgroups.resseq.strip()
+                                          coord = atom.xyz
+                                          db_id = pput.gen_db_id(pdb_code,chainid,resid)
+                                          peak_list.append(dict(db_id=db_id,resid=resid,chainid=chainid,coord=coord))
+            return peak_list
 
 
 
