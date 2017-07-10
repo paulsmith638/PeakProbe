@@ -31,7 +31,7 @@ class FeatureExtraction:
       def __init__(self):
             pass
 
-      def generate_peak_list(self,pdb_code,peak_pdb_hier,setchain=False,renumber=False):
+      def generate_peak_list(self,pdb_code,peak_pdb_hier,set_chain=False,renumber=False):
       #this function takes a list of peaks from a peak search as a pdb
       #and outputs a list of dictionaries with info and coordinates
       #if chainid is False, original chainids are preserved
@@ -40,8 +40,8 @@ class FeatureExtraction:
             pdb = peak_pdb_hier
             for model in pdb.models():
                   for chain in model.chains():
-                        if setchain:
-                              chainid=setchain
+                        if set_chain:
+                              chainid=set_chain
                         else:
                               chainid = chain.id.strip()
                         for resgroups in chain.residue_groups():

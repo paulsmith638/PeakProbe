@@ -1,5 +1,5 @@
 from __future__ import division
-import sys,copy
+import sys,copy,os
 import numpy as np
 #CCTBX IMPORTS
 import iotbx.pdb
@@ -24,6 +24,9 @@ from cctbx.array_family import flex
 from cctbx import maptbx
 #PProbe imports
 from PProbe_util import Util as pputil
+
+null_log = open(os.devnull,'w')
+
 
 #our class gets passed the following:
 #pdb root = pdb file we're working with
@@ -61,16 +64,13 @@ class StructData:
         masks_obj = mmtbx.masks.bulk_solvent(self.orig_xrs,True,solvent_radius = 1.1,shrink_truncation_radius=1.0,grid_step=0.25)
         return masks_obj.contact_surface_fraction
 
-    def asu_mappings(self,xrs):
-        #return an asu_mappings with 5.0A buffer
-        return xrs.asu_mappings(buffer_thickness=5.0)
-
     def make_fofc_map(self):
         # FOFC map of the whole original asu
         map_coeff = reflection_file_utils.extract_miller_array_from_file(
             file_name = self.map_file,
             label     = "FOFCWT,PHFOFCWT",
-            type      = "complex")
+            type      = "complex",
+            log       = null_log)
         map_sym = map_coeff.crystal_symmetry()
         fft_map = map_coeff.fft_map(resolution_factor=0.25)
         mapsig = np.nanstd(fft_map.real_map_unpadded().as_numpy_array())
@@ -83,7 +83,8 @@ class StructData:
         map_coeff = reflection_file_utils.extract_miller_array_from_file(
             file_name = self.map_file,
             label     = "2FOFCWT,PH2FOFCWT",
-            type      = "complex")
+            type      = "complex",
+            log       = null_log)
         map_sym= map_coeff.crystal_symmetry()
         fft_map = map_coeff.fft_map(resolution_factor=0.25)
         mapsig = np.nanstd(fft_map.real_map_unpadded().as_numpy_array())

@@ -4,6 +4,8 @@ np.set_printoptions(precision=5)
 np.set_printoptions(suppress=True)
 np.set_printoptions(linewidth=1e6, edgeitems=1e6)
 import sqlite3 as lite
+from PProbe_selectors import Selectors
+ppsel = Selectors(None)
 
 
 class DataIO:
@@ -14,24 +16,19 @@ class DataIO:
                              "so4_fofc_mean_cc60,so4_fofc_stdev_cc60,so4_2fofc_mean_cc60,so4_2fofc_stdev_cc60,"+\
                              "orires,vol_fofc,vol_2fofc,charge,resolution,db_id,bin,batch,omit,"+\
                              "solc, fofc_sig_in, twofofc_sig_in, fofc_sig_out, twofofc_sig_out,dmove,score"
-          self.np_raw_col_names = ('ccSf','ccWf','ccS2','ccW2','ccSifi','ccSifo','ccSi2i','ccSi2o',
-                                   'ccSifr','ccSi2r','ccWif','ccWi2','ccSf60','sdSf60','ccS260','sdS260',
-                                   'ori','vf','v2','charge','res','id','bin','batch','omit','solc',
-                                   'fofc_sigi','2fofc_sigi','fofc_sigo','2fofc_sigo','dmove','score')
-          self.np_raw_col_formats = (np.float64, np.float64, np.float64, np.float64, np.float64, np.float64, np.float64, np.float64, 
-                                     np.float64, np.float64, np.float64, np.float64, np.float64, np.float64, np.float64, np.float64,
-                                     'S16',np.float64,np.float64,np.float64,np.float64,'S16', np.int16,np.int16,np.bool,np.float64, 
-                                     np.float64, np.float64, np.float64, np.float64, np.float64, np.float64)
+          self.np_raw_col_names = ppsel.alldata_input_col
+          self.np_raw_col_formats = ppsel.alldata_input_formats
+          #self.np_raw_col_formats = (np.float64, np.float64, np.float64, np.float64, np.float64, np.float64, np.float64, np.float64, 
+          #                           np.float64, np.float64, np.float64, np.float64, np.float64, np.float64, np.float64, np.float64,
+          #                           'S16',np.float64,np.float64,np.float64,np.float64,'S16', np.int16,np.int16,np.bool,np.float64, 
+          #                           np.float64, np.float64, np.float64, np.float64, np.float64, np.float64)
           self.np_raw_dtype = np.dtype(zip(self.np_raw_col_names,self.np_raw_col_formats))
-          self.csv_format = ['%8g','%8g','%8g','%8g','%8g','%8g','%8g','%8g',
-                               '%8g','%8g','%8g','%8g','%8g','%8g','%8g','%8g',
-                               '%3s','%4g','%4g','%8g','%4g','%12s','%1d','%3d','%1d','%4g',
-                               '%4g','%4g','%4g','%4g','%4g','%8g']
+          self.csv_format = ppsel.features_csv_format
 
           self.results_csv_format = ['%12s','%4g','%8g','%8g','%8g','%8g','%8g','%8g','%8g','%8g','%2g']
           self.results_dtype = [('id','S16'),('res','f4'),('score','f4'),('prob','f4'),
                                 ('llgS','f4'),('llgW','f4'),('chiS','f4'),('chiW','f4'),
-                                ('fchi','f4'),('kchi','f4')]
+                                ('fchi','f4'),('kchi','f4'),('rc','i1')]
 
 
 

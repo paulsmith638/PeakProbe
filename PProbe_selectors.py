@@ -41,7 +41,7 @@ class Selectors:
           self.alldata_input_formats = (np.float64, np.float64, np.float64, np.float64,
                                       np.float64, np.float64, np.float64, np.float64, np.float64, np.float64, np.float64, np.float64,
                                       np.float64, np.float64, np.float64, np.float64,'S16',np.float64,np.float64,np.float64,np.float64,'S16',
-                                      np.int16,np.int16,'S32',np.float64, np.float64, np.float64, np.float64, np.float64, np.float64, np.float64)
+                                      np.int16,np.int16,np.bool,np.float64, np.float64, np.float64, np.float64, np.float64, np.float64, np.float64)
           self.alldata_input_dtype = np.dtype(zip(self.alldata_input_col,self.alldata_input_formats))
 
 
@@ -54,6 +54,19 @@ class Selectors:
                                       np.float64,np.float64,np.float64,'S16',np.float64,'S16',np.int16,np.int16,'S32',
                                       np.float64, np.float64, np.float64, np.float64, np.float64, np.float64, np.float64]
           self.alldata_pca_dtype = np.dtype(zip(self.alldata_pca_col,self.alldata_pca_formats))
+
+
+          self.features_csv_format = ['%8g','%8g','%8g','%8g','%8g','%8g','%8g','%8g',
+                                      '%8g','%8g','%8g','%8g','%8g','%8g','%8g','%8g',
+                                      '%3s','%4g','%4g','%8g','%4g','%12s','%1d','%3d','%1d','%4g',
+                                      '%4g','%4g','%4g','%4g','%4g','%8g']
+          self.results_csv_format = ['%12s','%4g','%8g','%8g','%8g','%8g','%8g','%8g','%8g','%8g','%2g']
+          self.results_csvin_dtype = [('id','S16'),('res','f4'),('score','f4'),('prob','f4'),
+                                      ('llgS','f4'),('llgW','f4'),('chiS','f4'),('chiW','f4'),     
+                                      ('fchi','f4'),('kchi','f4'),('rc','i1')]
+
+
+
           if raw_data is None: #allow for instantantiation without data, pass None for initializing without actual data
                pass
           else:
@@ -76,7 +89,7 @@ class Selectors:
                self.omit_bool = raw_data['omit']
 
           #group data into populations
-          self.included_data_bool = np.logical_and(self.sw_bool,np.invert(self.omit_bool))
+          self.included_data_bool = np.invert(self.omit_bool)
           self.inc_obss_bool = np.logical_and(self.included_data_bool,self.obss_bool)
           self.inc_obsw_bool = np.logical_and(self.included_data_bool,self.obsw_bool)
-
+          self.inc_sw_bool = np.logical_or(self.inc_obss_bool,self.inc_obsw_bool)
