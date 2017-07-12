@@ -24,6 +24,7 @@ from PProbe_peak import PeakObj
 from PProbe_struct import StructData
 from PProbe_ref import RSRefinements
 from PProbe_util import Util
+from PProbe_cctbx import CctbxHelpers
 from PProbe_realspace import RealSpace
 
 
@@ -70,12 +71,13 @@ class FeatureExtraction:
           peak_object = PeakObj(pdb_code,symmetry,orig_pdb_hier,strip_pdb_hier,peak_pdb_hier,struct_data,chainid,resid,coord,bound)
           ref_object=RSRefinements(peak_object)
           if write_maps:
-            ref_object.write_map(peak_object.local_map_fofc,"local_fofc")
-            ref_object.write_map(peak_object.local_map_2fofc,"local_2fofc")
-            ref_object.write_map(peak_object.inv_map_fofc,"inv_fofc")
-            ref_object.write_map(peak_object.inv_map_2fofc,"inv_2fofc")
-            ref_object.write_map(peak_object.shaped_map_2fofc,"shaped_2fofc")
-            ref_object.write_map(peak_object.shaped_map_fofc,"shaped_fofc")
+                pptbx = CctbxHelpers()
+                pptbx.write_local_map(peak_object.local_map_fofc,db_id+"_local_fofc",peak_object)
+                pptbx.write_local_map(peak_object.local_map_2fofc,db_id+"_local_2fofc",peak_object)
+                pptbx.write_local_map(peak_object.inv_map_fofc,db_id+"_inv_fofc",peak_object)
+                pptbx.write_local_map(peak_object.inv_map_2fofc,db_id+"_inv_2fofc",peak_object)
+                pptbx.write_local_map(peak_object.shaped_map_2fofc,db_id+"_shaped_2fofc",peak_object)
+                pptbx.write_local_map(peak_object.shaped_map_fofc,db_id+"_shaped_fofc",peak_object)
           return peak_object,ref_object
 
                 
@@ -94,4 +96,67 @@ class FeatureExtraction:
           features['2fofc_sig_out'] = peak_object.density_at_point(peak_object.local_map_2fofc,features['wat_fofc_ref_xrs'],features['wat_fofc_coord_out'])
           new_coord = features['wat_fofc_coord_out']
           features['dmove'] = np.linalg.norm(np.subtract(new_coord,(5.0,5.0,5.0)))
-          features['score'] = [-1.0] #scoring later
+          features['pchar'] = None #updated later
+          #collect all lists of contacts
+          features['contacts'] = peak_object.contacts
+          features['strip_contacts'] = peak_object.strip_contacts
+          features['peak_contacts'] = peak_object.peak_contacts
+          #s/w contacts added by rsr methods
+
+
+      def analyze_features(self,features):
+            """
+            Tally Contacts and to filter out bad peaks
+            Peaks refined too close to protein atoms will have many contacts less than 1A to atoms in the strip hierarchy
+            hack to store counts as a string of digits
+            """
+            #tally possible special position contacts (will show up twice)
+
+            dist_cutoffs = {"low":(0.00,1.1),"mid":(1.1,1.7),"high":(1.7,4.5)}
+            contact_tally = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+            special = np.count_nonzero(list(cont['special'] == True for cont in features['w_contacts']))
+            contact_tally[-1] = special
+            close_dist = [9.99,9.99,9.99,9.99,9.99]
+            for index,cdict in enumerate(('contacts','strip_contacts','s_contacts','w_contacts','peak_contacts')):
+                  if len(features[cdict]) > 0:
+                        close_dist[index] = "%3.2f" % features[cdict][0]['distance']
+                        for index2,cutoffs in enumerate(("low","mid","high")):
+                              lcut = dist_cutoffs[cutoffs][0]
+                              hcut = dist_cutoffs[cutoffs][1]
+                              cut_contacts =np.count_nonzero(list((cont['distance'] >= lcut and cont['distance'] < hcut) for cont in features[cdict])) 
+                              cut_contacts = np.clip(cut_contacts,0,9)
+                              contact_tally[5*index2+index] = cut_contacts
+            tally_string = "".join(('{:1s}'.format(str(x)) for x in contact_tally))
+            assert len(tally_string) == 16
+            features['panal'] = contact_tally
+            features['cstr'] = tally_string
+            solvent_content = np.clip(features['solc'],0.2,0.8)
+            sig_scale = 0.5*np.sqrt(0.5/(1.0 - solvent_content))
+
+            if contact_tally[3] > 1: # 2 or more bad wat contacts
+                  if special > 1:
+                        features['pchar'] = "splp" #could be close to sp
+                  else:
+                        features['pchar'] = "badw" #or just bad
+            elif contact_tally[3] == 1: #1 bad water contact
+                  if contact_tally[8] > 1: # 2 or more mid-range bad water contacts
+                        features['pchar'] = "badw"
+                  elif contact_tally[8] == 1 and (contact_tally[2] + contact_tally[7] > 8):
+                        #one bad water, one mid water,and many bad SO4
+                        features['pchar'] = "badw"
+                  else:
+                        features['pchar'] = "bads" #just a tight fit
+            elif contact_tally[8] > 2: #3 or more mid-bad water contacts
+                  features['pchar'] = "badw"
+
+            elif contact_tally[2] > 1:
+                  features['pchar'] = "bads"
+
+            elif np.nansum(contact_tally[0:11]) == 0:
+                  features['pchar'] = "2far"
+
+            elif features['2fofc_sig_out'] < sig_scale:
+                  features['pchar'] = "weak"
+            else:
+                  features['pchar'] = "good"
+

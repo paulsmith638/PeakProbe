@@ -37,29 +37,29 @@ class Selectors:
           #RAW input, all data
           self.alldata_input_col = ['ccSf','ccWf','ccS2','ccW2','ccSifi','ccSifo','ccSi2i','ccSi2o','ccSifr','ccSi2r','ccWif','ccWi2',
                                     'ccSf60','sdSf60','ccS260','sdS260','ori','vf','v2','charge','res','id','bin','batch','omit',
-                                    'solc','fofc_sigi','2fofc_sigi','fofc_sigo','2fofc_sigo','dmove','score']
+                                    'solc','fofc_sigi','2fofc_sigi','fofc_sigo','2fofc_sigo','dmove','cstr']
           self.alldata_input_formats = (np.float64, np.float64, np.float64, np.float64,
-                                      np.float64, np.float64, np.float64, np.float64, np.float64, np.float64, np.float64, np.float64,
-                                      np.float64, np.float64, np.float64, np.float64,'S16',np.float64,np.float64,np.float64,np.float64,'S16',
-                                      np.int16,np.int16,np.bool,np.float64, np.float64, np.float64, np.float64, np.float64, np.float64, np.float64)
+                                        np.float64, np.float64, np.float64, np.float64, np.float64, np.float64, np.float64, np.float64,
+                                        np.float64, np.float64, np.float64, np.float64,'S16',np.float64,np.float64,np.float64,np.float64,'S16',
+                                        np.int16,np.int16,np.bool,np.float64, np.float64, np.float64, np.float64, np.float64, np.float64,'S16')
           self.alldata_input_dtype = np.dtype(zip(self.alldata_input_col,self.alldata_input_formats))
 
 
           #all_data_post_pca
           self.alldata_pca_col = ['RX0','RX1','RX2','RX3','RX4','RX5','RX6','RX7','RX8','RX9','RX10','RX11',
                                   'RX12','RX13','RX14','RX15','RX16','RX17','RX18','ori','res','id','bin','batch','omit',
-                                  'solc','fofc_sigi','2fofc_sigi','fofc_sigo','2fofc_sigo','dmove','score']
+                                  'solc','fofc_sigi','2fofc_sigi','fofc_sigo','2fofc_sigo','dmove','cstr']
           self.alldata_pca_formats = [np.float64,np.float64,np.float64,np.float64,np.float64,np.float64,np.float64,np.float64,
                                       np.float64,np.float64,np.float64,np.float64,np.float64,np.float64,np.float64,np.float64,
                                       np.float64,np.float64,np.float64,'S16',np.float64,'S16',np.int16,np.int16,'S32',
-                                      np.float64, np.float64, np.float64, np.float64, np.float64, np.float64, np.float64]
+                                      np.float64, np.float64, np.float64, np.float64, np.float64, np.float64, 'S16']
           self.alldata_pca_dtype = np.dtype(zip(self.alldata_pca_col,self.alldata_pca_formats))
 
 
           self.features_csv_format = ['%8g','%8g','%8g','%8g','%8g','%8g','%8g','%8g',
                                       '%8g','%8g','%8g','%8g','%8g','%8g','%8g','%8g',
                                       '%3s','%4g','%4g','%8g','%4g','%12s','%1d','%3d','%1d','%4g',
-                                      '%4g','%4g','%4g','%4g','%4g','%8g']
+                                      '%4g','%4g','%4g','%4g','%4g','%4s']
           self.results_csv_format = ['%12s','%4g','%8g','%8g','%8g','%8g','%8g','%8g','%8g','%8g','%2g']
           self.results_csvin_dtype = [('id','S16'),('res','f4'),('score','f4'),('prob','f4'),
                                       ('llgS','f4'),('llgW','f4'),('chiS','f4'),('chiW','f4'),     

@@ -2,16 +2,10 @@ from __future__ import division
 #generic imports
 import sys,math,ast,copy
 import numpy as np
-#cctbx imports
-#from scitbx.array_family import flex
-#from iotbx.ccp4_map import write_ccp4_map
-#import iotbx.pdb
-#from scitbx import matrix
-#others
-try:
-      import sqlite3 as lite
-except: #skip and hope user doesn't call sqlite
-      pass
+
+#utility class of agnostic functions that should work
+#under all python versions with/without scipy
+
 
 class Util:
       def __init__(self):
@@ -30,7 +24,7 @@ class Util:
                   if not (chainid == 'ZZ' and resid == '9999'):
                         if dist < cutoff:
                               return resname[0:3]
-            #if peak was nothing (nothing close by, return XXX
+            #if peak was nothing (nothing close by, return XXX)
             return "XXX"
             
 
@@ -72,45 +66,7 @@ class Util:
                         return int(binname[3])
             return np.nan
 
-      def assign_resolution(self,pdb_id,input_resolution=999.99):
-            #currently queries a database
-            #dev option to assign resolutions directly from pdb database data
-            import sqlite3 as lite
-            con = lite.connect('/home/paul/projects/phenix/pdb_data/xray_structures.sql')
-            cur = con.cursor()
-            record = cur.execute("SELECT resolution FROM Structures WHERE pdbid=?",(pdb_id,))
-            try:
-                  #fetch mathing pdb resolution
-                  reso = float(record.fetchone()[0])
-            except:
-                  reso = input_resolution
-            return reso
 
-
-
-      def extract_raw(self,results_list):
-          col_names = ('ccSf','ccWf','ccS2','ccW2',
-                       'ccSifi','ccSifo','ccSi2i','ccSi2o','ccSifr','ccSi2r','ccWif','ccWi2',
-                       'ccSf60','sdSf60','ccS260','sdS260','ori','vf','v2','charge','res','id','bin','batch','omit')
-          #numpy data type formats
-          col_formats = (np.float64, np.float64, np.float64, np.float64,
-                         np.float64, np.float64, np.float64, np.float64, np.float64, np.float64, np.float64, np.float64,
-                         np.float64, np.float64, np.float64, np.float64,'S16',np.float64,np.float64,np.float64,np.float64,'S16',
-                         np.int16,np.int16,np.bool)
-          col_dtype = np.dtype(zip(col_names,col_formats))
-          
-          raw_array = []
-          for results in results_list:
-               data = tuple([results['so4_cc_fofc_out'], results['wat_cc_fofc_out'], results['so4_cc_2fofc_out'], results['wat_cc_2fofc_out'], 
-                             results['so4_cc_fofc_inv_in'],   results['so4_cc_fofc_inv_out'],results['so4_cc_2fofc_inv_in'],  results['so4_cc_2fofc_inv_out'],  
-                             results['so4_cc_fofc_inv_rev'],  results['so4_cc_2fofc_inv_rev'],results['wat_cc_fofc_inv'],  results['wat_cc_2fofc_inv'], 
-                             results['so4_fofc_mean_cc60'],results['so4_fofc_stdev_cc60'],results['so4_2fofc_mean_cc60'],results['so4_2fofc_stdev_cc60'],
-                             results['orires'],results['vol_fofc'],results['vol_2fofc'],results['charge'],results['resolution'],results['db_id'],results['bin'],
-                             "0",results['omit']])
-               raw_array.append(data)
-
-          data_array = np.fromiter((row for row in raw_array),dtype=col_dtype) 
-          return data_array
             
       def new_grid(self,coord,bound): 
             """
@@ -131,3 +87,7 @@ class Util:
             return grid
 
    
+      def write_atom(self,serial,name,alt,resname,chain,resid,ins,x,y,z,occ,temp,element,charge):
+            pdb_fmt_str ="{:<6s}{:5d} {:^4s}{:1s}{:3s}{:>2s}{:4d}{:1s}   {:8.3f}{:8.3f}{:8.3f}{:6.2f}{:6.2f}          {:>2s}{:2s}\n" 
+            record = pdb_fmt_str.format("ATOM",serial,name,alt,resname,chain,resid,ins,x,y,z,occ,temp,element,charge)
+            return record

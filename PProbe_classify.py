@@ -262,8 +262,6 @@ class ClassifierFunctions:
                sel_ind = np.argwhere(sel_mask == True)
                self.discriminant_analysis(input_data,input_results,plot=plot)
                results_array[sel_ind] = input_results #recombine output to original array
-               #new array scores pass to original
-               data_array['score'][sel_ind] = input_results['score']
           return results_array
 
      def initialize_results(self,data_array):
@@ -326,7 +324,6 @@ class ClassifierFunctions:
           chisq_s = np.nansum(np.divide(np.multiply(dev_s,dev_s),jsu_var_s),axis=1)
           chisq_w = np.nansum(np.divide(np.multiply(dev_w,dev_w),jsu_var_w),axis=1)
           #store score as LLG ratio 
-          data_array['score'] = llg_ratio
           #write to pre-instantiated structured array
           results_array['id'] = data_array['id']
           results_array['res'] = data_array['res']

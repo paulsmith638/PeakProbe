@@ -15,14 +15,10 @@ class DataIO:
                              "so4_cc_fofc_inv_rev,so4_cc_2fofc_inv_rev,wat_cc_fofc_inv,wat_cc_2fofc_inv,"+\
                              "so4_fofc_mean_cc60,so4_fofc_stdev_cc60,so4_2fofc_mean_cc60,so4_2fofc_stdev_cc60,"+\
                              "orires,vol_fofc,vol_2fofc,charge,resolution,db_id,bin,batch,omit,"+\
-                             "solc, fofc_sig_in, twofofc_sig_in, fofc_sig_out, twofofc_sig_out,dmove,score"
+                             "solc, fofc_sig_in, twofofc_sig_in, fofc_sig_out, twofofc_sig_out,dmove,cstr"
           self.np_raw_col_names = ppsel.alldata_input_col
           self.np_raw_col_formats = ppsel.alldata_input_formats
-          #self.np_raw_col_formats = (np.float64, np.float64, np.float64, np.float64, np.float64, np.float64, np.float64, np.float64, 
-          #                           np.float64, np.float64, np.float64, np.float64, np.float64, np.float64, np.float64, np.float64,
-          #                           'S16',np.float64,np.float64,np.float64,np.float64,'S16', np.int16,np.int16,np.bool,np.float64, 
-          #                           np.float64, np.float64, np.float64, np.float64, np.float64, np.float64)
-          self.np_raw_dtype = np.dtype(zip(self.np_raw_col_names,self.np_raw_col_formats))
+          self.np_raw_dtype = ppsel.alldata_input_dtype
           self.csv_format = ppsel.features_csv_format
 
           self.results_csv_format = ['%12s','%4g','%8g','%8g','%8g','%8g','%8g','%8g','%8g','%8g','%2g']
@@ -65,11 +61,25 @@ class DataIO:
                              features['resolution'],features['db_id'],features['bin'],np.random.randint(0,1000),features['omit'],
                              features['solc'],features['fofc_sig_in'],features['2fofc_sig_in'],
                              features['fofc_sig_out'],features['2fofc_sig_out'],
-                             features['dmove'],features['score'][0]])
+                             features['dmove'],features['cstr']])
                raw_array.append(data)
-
           data_array = np.fromiter((row for row in raw_array),dtype=self.np_raw_dtype) 
           return data_array
+
+     def store_contacts(self,features):
+          #run on every individual peak?
+          db_id = features['db_id']
+          contacts = features['contacts']
+          strip_contacts = features['strip_contacts']
+          s_contacts = features['s_contacts']
+          w_contacts = features['w_contacts']
+          p_contacts = features['peak_contacts']
+          f = open(db_id+"_contacts.list",'w')
+          for c_batch,c_list in  zip(("ORI","STR","SO4","WAT","PKI"),(contacts,strip_contacts,s_contacts,w_contacts,p_contacts)):
+               for contact in c_list: #list of dictionaries
+                    print >> f, c_batch,contact
+          f.close()
+
 
      def store_features_csv(self,np_feature_array,filename):
           print "STORING FEATURES FOR %s PEAKS TO CSV FILE %s" % (np_feature_array.shape[0],filename)
@@ -97,7 +107,7 @@ class DataIO:
                                 features['resolution'],features['db_id'],features['bin'],"0",features['omit'],
                                 features['solc'],features['fofc_sig_in'],features['2fofc_sig_in'],
                                 features['fofc_sig_out'],features['2fofc_sig_out'],
-                                features['dmove'],features['score'][0]),dtype=np.str_)
+                                features['dmove'],features['cstr']),dtype=np.str_)
                   #batch is currently set to 0, used elsewhere for cross_validation, etc.
 
           con = lite.connect(filename)
@@ -116,7 +126,7 @@ class DataIO:
                            "so4_2fofc_mean_cc60 REAL, so4_2fofc_stdev_cc60 REAL,"+
                            "orires TEXT, vol_fofc INT, vol_2fofc INT,"+ 
                            "charge REAL, resolution REAL, db_id TEXT, bin INT, batch INT, omit INT,"+
-                           "solc REAL, fofc_sig_in REAL, twofofc_sig_in REAL, fofc_sig_out REAL, twofofc_sig_out REAL, dmove REAL,score REAL)")
+                           "solc REAL, fofc_sig_in REAL, twofofc_sig_in REAL, fofc_sig_out REAL, twofofc_sig_out REAL, dmove REAL,cstr TEXT)")
                cur.execute("INSERT INTO Peaks VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", data.transpose())
       
           con.commit()
