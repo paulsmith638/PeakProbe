@@ -39,34 +39,40 @@ class PProbeTasks:
         assert cmdline or phenix_params
         #setup some dev options
         self.dev_opts = {'set_chain':False,'pdb_out_str':"",
-                         'renumber':False,'write_ref_pdb':True,
-                         'write_maps':True,'ressig':False}
+                         'renumber':False,'write_ref_pdb':False,
+                         'write_maps':False,'ressig':False,
+                         'write_contacts':True}
 
         #command line expects 5 args as listlike (NB: filenames) 
         #   resolution,input_pdb,input_strip_pdb,peaks_pdb,input_map_mtz 
+        #   output_code is optional
         #phenix params should be a file formatted by phil
+        #should be processed properly by phil . . . 
         if cmdline:
             self.score_res,self.model_pdb,self.strip_pdb,self.peaks_pdb,self.map_coeff = cmdline[0:5]
-            self.out_prefix = str(self.model_pdb)
+            if len(cmdline) == 6:
+                if len(cmdline[5]) > 3:
+                    self.out_prefix = cmdline[5]
+            else:
+                self.out_prefix = 'user'
         if phenix_params:
             phil_f = open(phenix_params,'r')
             phil_str = phil_f.read()
             phil_f.close()
             master_phil = phil.parse(phil_str)
             self.phe_par = master_phil.extract()
-            self.model_pdb = self.phe_par.input.pdb.model_pdb
-            self.strip_pdb = self.phe_par.input.pdb.strip_pdb
-            self.peaks_pdb = self.phe_par.input.pdb.peaks_pdb
-            self.map_coeff = self.phe_par.input.input_map.map_coeff_file
-            self.score_res = self.phe_par.input.parameters.score_res
-            self.out_prefix =self.phe_par.output.output_file_name_prefix
+            self.model_pdb = self.phe_par.input.pdb.model_pdb[0]
+            self.strip_pdb = self.phe_par.input.pdb.strip_pdb[0]
+            self.peaks_pdb = self.phe_par.input.pdb.peaks_pdb[0]
+            self.map_coeff = self.phe_par.input.input_map.map_coeff_file[0]
+            self.score_res = self.phe_par.input.parameters.score_res[0]
+            self.out_prefix  = self.phe_par.output.output_peak_prefix[0][0:4]
             """
             fix dev options here
             """
     def feature_extract(self):
         # Master Feature Extraction for User Classification
-
-        pdb_code = 'user'
+        pdb_code = self.out_prefix
         peaks_features = []
         #here we go:
         map_file = self.map_coeff
@@ -118,7 +124,8 @@ class PProbeTasks:
             features['pdb_code']= pdb_code
             ppfeat.basic_features(features,peak_object)
             features['solc'] = struct_data.solvent_content
-            ppio.store_contacts(features)
+            if self.dev_opts['write_contacts']:
+                ppio.store_contacts(features)
             ppfeat.analyze_features(features)
 
             peaks_features.append(features)
@@ -147,12 +154,13 @@ class PProbeTasks:
                 cc_id = cc_chain+str(cc_resid)+"_"+cc_res+"_"+cc_name
             else:
                 cc_id = "Cdist>6.0"
+                cc_dist =9.99
                    
             print "   Peak %s 2FoFc: %4.2f FoFc %4.2f is %3.2fA from %14s %s STATUS: %s" % (features['db_id'],features['2fofc_sig_out'],
                                                                                     features['fofc_sig_out'],cc_dist,cc_id,peak_tally,
                                                                                     peak_status)
             #print "      ",features['panal']
-        #returns a list of dictionaries each containing result values, objects, etc.
+        #returns a list of dictionaries each containing a mess of result values, objects, etc.
         print "Finished Feature Extraction"
         return peaks_features
 

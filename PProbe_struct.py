@@ -130,7 +130,6 @@ class StructData:
         #must select the "i" of an "i-j" pair?
         isel=selection.iselection()
         # new restraints system, should add a harmoinc restraint to S
-        processed_pdb.all_chain_proxies.pdb_hierarchy.write_pdb_file(file_name="testagain.pdb")
         restraints_manager.geometry.add_reference_coordinate_restraints_in_place(
             #processed_pdb.all_chain_proxies,
             pdb_hierarchy=processed_pdb.all_chain_proxies.pdb_hierarchy,

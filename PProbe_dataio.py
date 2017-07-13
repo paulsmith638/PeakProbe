@@ -77,7 +77,12 @@ class DataIO:
           f = open(db_id+"_contacts.list",'w')
           for c_batch,c_list in  zip(("ORI","STR","SO4","WAT","PKI"),(contacts,strip_contacts,s_contacts,w_contacts,p_contacts)):
                for contact in c_list: #list of dictionaries
-                    print >> f, c_batch,contact
+                    #simplify output for lookup later (huge amount of data)
+                    dist='{:3.2f}'.format(contact['distance'])
+                    resat = contact['resname']+"-"+contact['name']
+                    chres = contact['chain']+contact['resid']
+                    outstr = ','.join((db_id,c_batch,resat,chres,dist))
+                    print >> f,outstr
           f.close()
 
 
