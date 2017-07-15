@@ -133,7 +133,7 @@ class FeatureExtraction:
             solvent_content = np.clip(features['solc'],0.2,0.8)
             sig_scale = 0.5*np.sqrt(0.5/(1.0 - solvent_content))
 
-            if contact_tally[3] > 1: # 2 or more bad wat contacts
+            if contact_tally[3] > 1: # 2 or more bad wl contacts
                   if special > 1:
                         features['pchar'] = "splp" #could be close to sp
                   else:

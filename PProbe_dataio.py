@@ -93,6 +93,7 @@ class DataIO:
      def read_features_csv(self,filename):
           data_array = np.loadtxt(filename,delimiter=',',dtype=self.np_raw_dtype)
           print "READ FEATURES FOR %s PEAKS FROM FILE %s" % (data_array.shape[0],filename)
+          return data_array
 
 
      def store_features_sql(self,features,filename):
@@ -143,4 +144,5 @@ class DataIO:
 
      def read_results_csv(self,filename):
           results_array = np.loadtxt(filename,delimiter=',',dtype=self.results_dtype)
-          print "READ RESULTS FOR %s PEAKS FROM FILE %s" % (results.shape[0],filename)
+          print "READ RESULTS FOR %s PEAKS FROM FILE %s" % (results_array.shape[0],filename)
+          return results_array

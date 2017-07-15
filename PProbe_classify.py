@@ -337,42 +337,58 @@ class ClassifierFunctions:
      def score_breakdown(self,data_array,results_array):
           #boolean array of criteria
           #1 = label S
-          #2 = obs S
-          #3 = good S score
-          #4 = good W score
-          logical_ass = np.zeros((data_array.shape[0],4),dtype=np.bool_)
+          #2 = label W
+          #3 = obs S
+          #4 = good S score
+          #5 = good W score
+          logical_ass = np.zeros((data_array.shape[0],5),dtype=np.bool_)
           # returns boolean masks array
           selectors = Selectors(data_array)
-          logical_ass[:,0] = selectors.inc_obss_bool
-          logical_ass[:,1] = results_array['score'] >= 0 
-          logical_ass[:,2] = results_array['llgS'] > 0.0
-          logical_ass[:,3] = results_array['llgW'] > 0.0
+          logical_ass[:,0] = selectors.inc_obss_bool 
+          logical_ass[:,1] = selectors.inc_obsw_bool 
+          logical_ass[:,2] = results_array['score'] >= 0 
+          logical_ass[:,3] = results_array['llgS'] > 0.0
+          logical_ass[:,4] = results_array['llgW'] > 0.0
+          #logical classes (probably not a logical approach . . . )
+          lc10110 = (logical_ass == (1,0,1,1,0)).all(axis=1) #1 = TP w / bad water score
+          lc10101 = (logical_ass == (1,0,1,0,1)).all(axis=1) #2 = impossible
+          lc10111 = (logical_ass == (1,0,1,1,1)).all(axis=1) #3 = TP w / good water score
+          lc10100 = (logical_ass == (1,0,1,0,0)).all(axis=1) #4 = TP with bad scores
 
-          lc1110 = (logical_ass == (1,1,1,0)).all(axis=1) #1 = TP w / bad water score
-          lc1101 = (logical_ass == (1,1,0,1)).all(axis=1) #2 = impossible
-          lc1111 = (logical_ass == (1,1,1,1)).all(axis=1) #3 = TP w / good water score
-          lc1100 = (logical_ass == (1,1,0,0)).all(axis=1) #4 = TP with bad scores
+          lc01010 = (logical_ass == (0,1,0,1,0)).all(axis=1) #5 = impossible
+          lc01001 = (logical_ass == (0,1,0,0,1)).all(axis=1) #6 = TN with bad S score
+          lc01011 = (logical_ass == (0,1,0,1,1)).all(axis=1) #7 = TN with good S score
+          lc01000 = (logical_ass == (0,1,0,0,0)).all(axis=1) #8 = TN with bad scores
 
-          lc0010 = (logical_ass == (0,0,1,0)).all(axis=1) #5 = impossible
-          lc0001 = (logical_ass == (0,0,0,1)).all(axis=1) #6 = TN with bad S score
-          lc0011 = (logical_ass == (0,0,1,1)).all(axis=1) #7 = TN with good S score
-          lc0000 = (logical_ass == (0,0,0,0)).all(axis=1) #8 = TN with bad scores
+          lc01110 = (logical_ass == (0,1,1,1,0)).all(axis=1) #9 = FP with good S score (bad label?)
+          lc01101 = (logical_ass == (0,1,1,0,1)).all(axis=1) #10 = impossible
+          lc01111 = (logical_ass == (0,1,1,1,1)).all(axis=1) #11 = FP with good W score
+          lc01100 = (logical_ass == (0,1,1,0,0)).all(axis=1) #12 = FP with bad scores
 
-          lc0110 = (logical_ass == (0,1,1,0)).all(axis=1) #9 = FP with good S score (bad label?)
-          lc0101 = (logical_ass == (0,1,0,1)).all(axis=1) #10 = impossible
-          lc0111 = (logical_ass == (0,1,1,1)).all(axis=1) #11 = FP with good W score
-          lc0100 = (logical_ass == (0,1,0,0)).all(axis=1) #12 = FP with bad scores
+          lc10010 = (logical_ass == (1,0,0,1,0)).all(axis=1) #13 = impossible
+          lc10001 = (logical_ass == (1,0,0,0,1)).all(axis=1) #14 = FN with good W score (bad label?)
+          lc10011 = (logical_ass == (1,0,0,1,1)).all(axis=1) #15 = FN with good scores
+          lc10000 = (logical_ass == (1,0,0,0,0)).all(axis=1) #16 = FN with bad scores
+          #for peaks with neither s nor w label
+          lc00010 = (logical_ass == (0,0,0,1,0)).all(axis=1) #17 other -- obsw,goods,badw --> impossible
+          lc00001 = (logical_ass == (0,0,0,0,1)).all(axis=1) #18 other -- obsw,bads,goodw --> ok
+          lc00011 = (logical_ass == (0,0,0,1,1)).all(axis=1) #19 other -- obsw,goods,betterw --> ok
+          lc00000 = (logical_ass == (0,0,0,0,0)).all(axis=1) #20 other -- all bad --> ok
 
-          lc1010 = (logical_ass == (1,0,1,0)).all(axis=1) #13 = impossible
-          lc1001 = (logical_ass == (1,0,0,1)).all(axis=1) #14 = FN with good W score (bad label?)
-          lc1011 = (logical_ass == (1,0,1,1)).all(axis=1) #15 = FN with good S score
-          lc1000 = (logical_ass == (1,0,0,0)).all(axis=1) #16 = FN with bad scores
+          lc00110 = (logical_ass == (0,0,1,1,0)).all(axis=1) #21 other obss,goods, badw --> ok
+          lc00101 = (logical_ass == (0,0,1,0,1)).all(axis=1) #22 other obss, bads, goodw --> impossible
+          lc00111 = (logical_ass == (0,0,1,1,1)).all(axis=1) #23 other obss, good, good --> ok
+          lc00100 = (logical_ass == (0,0,1,0,0)).all(axis=1) #24 other obss, bad, bad --> ok
 
           result_class = np.zeros(data_array.shape[0],dtype=np.int16)
-          for index,lclass in enumerate((lc1110,lc1101,lc1111,lc1100,lc0010,lc0001,lc0011,lc0000,
-                                         lc0110,lc0101,lc0111,lc0100,lc1010,lc1001,lc1011,lc1000)):
+          for index,lclass in enumerate((lc10110,lc10101,lc10111,lc10100,
+                                         lc01010,lc01001,lc01011,lc01000,
+                                         lc01110,lc01101,lc01111,lc01100,
+                                         lc10010,lc10001,lc10011,lc10000,
+                                         lc00010,lc00001,lc00011,lc00000,
+                                         lc00110,lc00101,lc00111,lc00100)):
                select = lclass
-               result_class[select] = index + 1
+               result_class[select] = index + 1 #number from one
           results_array['rc'] = result_class
 
 
@@ -393,8 +409,9 @@ class ClassifierFunctions:
                rec = float(numTP)/(numTP + numFN)
           else:
                rec = 0.0
-          if (numTP+numFP+numFN) > 0:
-               f1 = (2.0*numTP)/(2.0*numTP+numFP+numFN)#harmonic mean of ppv and rec
+          if (ppv + rec) > 0:
+               #harmonic mean of ppv and rec
+               f1 = 2.0*(ppv*rec)/(ppv+rec)
           else:
                f1 = 0.0
           return acc,ppv,npv,rec,f1
@@ -407,7 +424,6 @@ class ClassifierFunctions:
           self.score_breakdown(data_array,results_array)
           result_class = results_array['rc']
 
-
           for resbin in range(10):
                if resbin == 0: #all data
                     selected_data = data_array
@@ -418,31 +434,41 @@ class ClassifierFunctions:
                     selected_results = results_array[data_array['bin'] == resbin]
                     selected_class = result_class[data_array['bin'] == resbin]
                count = selected_data.shape[0]
-               if count < 10: #not enough data in bin
+               if plot and count < 10: #not enough data in bin
                     plot_data.append([0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0])
                     break
                counts = []
-               for rclass in np.arange(1,17,1):
+               for rclass in np.arange(1,25,1):
                     counts.append(np.count_nonzero(selected_class == rclass))
 
                
                print "STATS FOR BIN %1s PEAKS %8s" % (resbin,count)
                for index,s_class in enumerate(('ALL_DAT','POS_LLG')):
-                    res_arr =np.array(counts).reshape((4,4)) 
+                    res_arr =np.array(counts).reshape((6,4)) 
                     if index == 0:
-                         tp,tn,fp,fn = np.nansum(res_arr,axis=1)
-                         count = np.nansum(res_arr)
+                         tp,tn,fp,fn = np.nansum(res_arr[0:4,:],axis=1)
+                         count = np.nansum(res_arr[0:4,:])
+                         other_s,other_w = np.nansum(res_arr[4,:]),np.nansum(res_arr[5,:])
+                         otot = other_s + other_w
                     else:
-                         #remove classes with bad scores for both 4,8,12,16               
-                         res_arr[:,-1] = np.zeros(4)
-                         tp,tn,fp,fn = np.nansum(res_arr,axis=1) 
-                         count = np.nansum(res_arr)
+                         #remove classes with bad scores for both 4,8,12,16,20,24            
+                         res_arr[:,-1] = 0
+                         tp,tn,fp,fn = np.nansum(res_arr[0:4,:],axis=1) 
+                         count = np.nansum(res_arr[0:4,:])
+                         other_w,other_s = np.nansum(res_arr[4,:]),np.nansum(res_arr[5,:])
+                         otot = other_s + other_w
                     acc,ppv,npv,rec,f1 = self.score_class(tp,tn,fp,fn)
+                    count = np.clip(count,1,np.inf)
+                    otot = np.clip(otot,1,np.inf)
                     ftp,ftn,ffp,ffn = np.array((tp,tn,fp,fn))/float(count)
                     print "    %s   TP %5s(%4.3f) TN %5s(%4.3f) FP %5s(%4.3f) FN %5s(%4.3f)" % (s_class,tp,ftp,tn,ftn,fp,ffp,fn,ffn)
-                    print "               ACC %4.3f    PPV %4.3f    NPV %4.3f    REC %4.3f        F1 %4.3f" % (acc,ppv,npv,rec,f1)
-                    print "      RC: ", " ".join('{:5d}'.format(x) for x in np.arange(1,17,1))
-                    print "          ", " ".join('{:5d}'.format(x) for x in res_arr.reshape(-1))
+                    print "      No SW Label: Total %5d PredS %5s(%4.3f) PredW %5s(%4.3f)" % (otot,other_s,float(other_s)/otot,other_w,
+                                                                                              float(other_w)/otot)
+                    print "      RC: ", " ".join('{:5d}'.format(x) for x in np.arange(1,13,1))
+                    print "          ", " ".join('{:5d}'.format(x) for x in res_arr.reshape(-1)[0:12])
+                    print "      RC: ", " ".join('{:5d}'.format(x) for x in np.arange(13,25,1))
+                    print "          ", " ".join('{:5d}'.format(x) for x in res_arr.reshape(-1)[12:25])
+                    print "     RATIOS: ACC %4.3f    PPV %4.3f    NPV %4.3f    REC %4.3f        F1 %4.3f" % (acc,ppv,npv,rec,f1)
                     print ""
 
                     if plot:
