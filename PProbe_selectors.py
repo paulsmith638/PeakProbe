@@ -83,10 +83,13 @@ class Selectors:
           #selects water
           self.obsw_bool = original_residue == 'HOH'
           #selects data flagged for omit, bad structures, etc.
-          if raw_data['omit'].dtype == '|S32':
-               self.omit_bool = np.array(raw_data['omit'] == 'True').astype(np.bool)
-          if raw_data['omit'].dtype == 'bool':
-               self.omit_bool = raw_data['omit']
+          if 'omit' in raw_data:
+               if raw_data['omit'].dtype == '|S32':
+                    self.omit_bool = np.array(raw_data['omit'] == 'True').astype(np.bool)
+               if raw_data['omit'].dtype == 'bool':
+                    self.omit_bool = raw_data['omit']
+          else:
+               self.omit_bool = np.zeros(raw_data.shape[0],dtype=np.bool_)
 
           #group data into populations
           self.included_data_bool = np.invert(self.omit_bool)

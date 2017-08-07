@@ -41,7 +41,7 @@ class PProbeTasks:
         self.dev_opts = {'set_chain':False,'pdb_out_str':"",
                          'renumber':False,'write_ref_pdb':False,
                          'write_maps':False,'ressig':False,
-                         'write_contacts':True}
+                         'write_contacts':False}
 
         #command line expects 5 args as listlike (NB: filenames) 
         #   resolution,input_pdb,input_strip_pdb,peaks_pdb,input_map_mtz 
@@ -131,20 +131,15 @@ class PProbeTasks:
             peaks_features.append(features)
 
             #generate some output
-            if features['pchar'] == "badw":
-                peak_status = "BAD PEAK -- model error?"
-            elif features['pchar'] == "bads":
-                peak_status = "TIGHT FIT -- SO4 unlikely"
-            elif features['pchar'] == "2far":
-                peak_status = "FAR AWAY -- spurious?"
-            elif features['pchar'] == "weak":
-                peak_status = "WEAK 2FoFc -- suspect?"
-            elif features['pchar'] == "splp":
-                peak_status = "Possible Special Position"
-            elif features['pchar'] == "good":
-                peak_status = "PASSED"
-            peak_ss = "".join((str(x) for x in features['panal']))
-            peak_tally = peak_ss[0:5]+"-"+peak_ss[5:10]+"-"+peak_ss[10:15]+"-"+peak_ss[15]
+            peak_status=""
+            for flag,value in features['peak_flags'].iteritems():
+                if value == True:
+                    peak_status = peak_status+" "+flag
+
+            if peak_status == "":
+                peak_status = "OKAY"
+
+            #identify closest contact in stripped pdb
             if len(features['strip_contacts']) > 0:
                 closest_contact = features['strip_contacts'][0]
                 cc_name,cc_res,cc_resid,cc_chain,cc_dist = closest_contact['name'],closest_contact['resname'],\
@@ -155,12 +150,10 @@ class PProbeTasks:
             else:
                 cc_id = "Cdist>6.0"
                 cc_dist =9.99
-                   
-            print "   Peak %s 2FoFc: %4.2f FoFc %4.2f is %3.2fA from %14s %s STATUS: %s" % (features['db_id'],features['2fofc_sig_out'],
-                                                                                    features['fofc_sig_out'],cc_dist,cc_id,peak_tally,
-                                                                                    peak_status)
-            #print "      ",features['panal']
-        #returns a list of dictionaries each containing a mess of result values, objects, etc.
+            pfmt = lambda val: "{0!s:^5s}".format(val)[0:4]
+            print "   Peak %s 2FoFc: %s FoFc %s is %sA from %12s STATUS: %s" % (features['db_id'],pfmt(features['2fofc_sig_out']),
+                                                                                pfmt(features['fofc_sig_out']),pfmt(cc_dist),
+                                                                                cc_id,peak_status)
         print "Finished Feature Extraction"
         return peaks_features
 
@@ -168,6 +161,8 @@ class PProbeTasks:
 
 
     def score_features(self,features,plot=False):
+        print "-"*79
+        print "CLASSIFICATION RUN %s PEAKS:" % features.shape[0]
         raw_data = np.sort(features,order=['res','id'])
         selectors = Selectors(raw_data)
         ppcf = ClassifierFunctions()
@@ -179,4 +174,91 @@ class PProbeTasks:
         ppcf.score_breakdown(pca_scaled_data,results_array)
         return results_array
 
+    def classify_peaks(self,results_array,cfeat_array):
+        print "-"*79
+        print "ASSIGNING PEAK CLASSES:"
+
+        ppcf = ClassifierFunctions()
+        flag_class = ppcf.peak_fc(cfeat_array)
+        edc = ppcf.peak_edc(results_array)
+        c_class = ppcf.peak_cc(results_array,cfeat_array)
+
+        warnd = {'spl':' SPL_POS?','rem':' REMOTE','bc':' BAD_CONT','rej':' REJECTED',
+                 'close':' 1_BAD_CONT','chk':' INSPECT_MANUALLY','weak':' WEAK_2FOFC',
+                 'mdl':' MODEL_ERROR?--chk_ROT/ALT','unk': ' AMBIGUOUS'}
+     
+        fmt_scr = lambda result: " ".join(('{:5.2f}'.format(x)[0:5] for x in (result['llgS'],result['llgW'],
+                                                                     result['chiS'],result['chiW'])))
+
+        ori_class = np.zeros(cfeat_array.shape[0],dtype=np.int16)
+        ori_class[cfeat_array['ori'] == 'HOH'] = 1
+        ori_class[cfeat_array['ori'] == 'SO4'] = 2
+        ori_class[cfeat_array['ori'] == 'PO4'] = 2
+        ori_class[cfeat_array['ori'] == 'XXX'] = 3
+        ori_class[ori_class == 0] = 4 #other
+        #     #user_P_00001 19.07 -12.8 12.91 126.9   2 1 1 1 0
+        print "   PPROBE       SCORES       FITS       CLASSES"                       
+        print "Peak ID tag   llgS  llgW  chiS  shiW   I P E C F  Results"           
+        pred = np.array(results_array['score'] > 0,dtype=np.int16)
+        for index,peak in enumerate(cfeat_array):
+            ori = ori_class[index]
+            p_edc = edc[index]
+            p_cc = c_class[index]
+            p_fc = flag_class[index]
+            
+            scoref = fmt_scr(results_array[index])
+            warn = ""
+            """
+            if peak['flagc'] == 1:
+                warn = warn+warnd['spl']+warnd['chk']
+            if peak['flagc'] == 2:
+                warn = warn+warnd['bc']+warnd['rej']
+            if peak['flagc'] == 3:
+                warn = warn+warnd['bc']+warnd['rej']
+            if peak['flagc'] == 4:
+                warn = warn+warnd['bc']+warnd['chk']
+            if peak['flagc'] == 5:
+                warn = warn+warnd['close']+warnd['chk']
+            if peak['flagc'] == 6:
+                warn = warn+warnd['rem']+warnd['chk']
+            if peak['weak']:
+                warn = warn+warnd['weak']
+            if peak['edc'] == 3:
+                warn = warn+warnd['mdl']
+            if peak['edc'] == 4:
+                warn = warn+warnd['unk']
+
+            if peak['edc'] == 1:
+                pred = 'SO4'
+            if peak['edc'] == 2:
+                pred = 'HOH'
+            if peak['edc'] == 3:
+                pred = 'ERR'
+            if peak['edc'] == 4:
+                pred = 'UNK'
+
+            if warn == "":
+                if ori == pred:
+                    warn = " GOOD->keep"
+                elif ori == "XXX":
+                    if pred == "SO4":
+                        warn = " NEW->SO4"
+                    if pred == "HOH":
+                        warn = " NEW->HOH"
+            if ori == "SO4" and pred == 'HOH':
+                warn = warn+" BAD->unlikely SO4"
+            if ori == "HOH" and pred == 'SO4':
+                warn = warn+" BAD->check model"
+            """         
+
+                
+            print "%s %s %3s %1d %1d %1d %1d %s" % (peak['id'],scoref,ori,pred[index],p_edc,p_cc,p_fc,warn)
+            #print cfeat_arr[index]
+
         
+
+
+
+
+
+

@@ -2,9 +2,14 @@ from __future__ import division
 # LIBTBX_SET_DISPATCHER_NAME phenix.pprobe_test
 
 import sys,os,time,copy
+import numpy as np
+np.set_printoptions(precision=4)
+np.set_printoptions(suppress=True)
+np.set_printoptions(linewidth=1e6, edgeitems=1e6)
 from iotbx import file_reader
 from iotbx import phil
 from iotbx import reflection_file_utils
+from iotbx import crystal_symmetry_from_any
 from mmtbx.monomer_library import pdb_interpretation
 from mmtbx.monomer_library import server
 from mmtbx import map_tools
@@ -22,16 +27,13 @@ from libtbx.utils import multi_out
 
 from PProbe_tasks import PProbeTasks
 from PProbe_dataio import DataIO
-pptask = PProbeTasks()
+
 ppio = DataIO()
 null_log = open(os.devnull,'w')
 
 """
 Trial version of phenix script for running PProbe.
-
-Here, make maps and pdbs for use downstream
-
-
+1) process data to get/identify 3 PDB files and map coeff
 """
 
 
@@ -147,9 +149,45 @@ output {
   output_file_name_prefix = None
     .type = str
     .short_caption = Output prefix
+  output_peak_prefix = user
+    .type = str
+    .short_caption = label for peak data (must be 4 characters)
+}
+pprobe{
+  ori_mod = False
+    .type = bool
+    .short_caption = I'm not sure
+  dev{
+    set_chain = None
+      .type = str
+      .short_caption = Set new chainid for output peaks
+    renumber = False
+      .type = bool
+      .short_caption = Force new peak renumbering
+    write_ref_pdb = False
+      .type = bool
+      .short_caption = Write PDBs for every peak
+      .help = Dev feature, produces many files for every peak (caution!)
+    pdb_out_str = None
+      .type = str
+      .short_caption = string for pdb/map writing (cev feature)
+    ressig = None
+      .type = float
+      .short_caption = user input restraint for realspace 
+      .help = dev option -- not well tested
+    write_maps = False
+      .type = bool
+      .short_caption = Write CCP4 maps for every peak
+      .help = Dev feature, produces many files for every peak (caution!)
+    write_contacts = False
+      .type = bool
+      .short_caption = Write contacts for every peak
+      .help = Dev feature, produces many files for every peak (caution!)
+  }
 }
 gui
-  .help = "GUI-specific parameter required for output directory" {
+  .help = "GUI-specific parameter required for output directory" 
+  {
   output_dir = None
     .type = path
     .style = output_dir
@@ -168,7 +206,7 @@ peak_search{
   peak_search {
     peak_search_level = 1
     max_peaks = 0
-    min_distance_sym_equiv = 0.5
+    min_distance_sym_equiv = None
     general_positions_only = False
     min_cross_distance = 1.8
     min_cubicle_edge = 5
@@ -178,9 +216,17 @@ peak_search{
 
 def run(args):
   all_params = process_inputs(args)
+  run_pprobe(all_params)
 
 
-
+def run_pprobe(all_params):
+  pptask = PProbeTasks(phenix_params=all_params.output.output_file_name_prefix+"_pprobe.param")
+  ppio = DataIO()
+  features_list=pptask.feature_extract()
+  features_array=ppio.extract_raw(features_list)
+  ppio.store_features_csv(features_array,all_params.output.output_file_name_prefix+"_data.csv")
+  results = pptask.score_features(features_array,plot=False)
+  ppio.store_results_csv(results,all_params.output.output_file_name_prefix+"_results.csv")
 
 def process_inputs(args, log = sys.stdout):
   print >> log, "-"*79
@@ -202,7 +248,6 @@ def process_inputs(args, log = sys.stdout):
 
   #params object contains all command line parameters
   working_phil = inputs.params
-  #working_phil.show()
   params = working_phil.extract()
 
   #check for proper PDB input
@@ -235,6 +280,8 @@ def process_inputs(args, log = sys.stdout):
     raise Sorry("Only one type of reflection data can be entered \n"+\
                 "Enter map coefficients with map_coeff_file=XXX.mtz \n"+\
                 "or structure factor files as XXX.(any supported)")
+  else:
+    params.input.reflection_data.reflection_file_name = reflection_files[0].file_name()
 
   #filename setup
   model_basename = os.path.basename(params.input.pdb.model_pdb.split(".")[0])
@@ -274,7 +321,7 @@ def process_inputs(args, log = sys.stdout):
 
   #Make maps if map_coefficients not input,write out by default
   if (params.input.input_map.map_coeff_file is None):
-    params.input.reflection_data.reflection_file_name = reflection_files[0].file_name()
+
     hkl_in = file_reader.any_file(params.input.reflection_data.reflection_file_name,force_type="hkl")
     hkl_in.assert_file_type("hkl")
     reflection_files = [ hkl_in.file_object ]
@@ -285,11 +332,25 @@ def process_inputs(args, log = sys.stdout):
     print >> log, "Writing PProbe maps to MTZ file: ",map_fname
     maps.write_mtz_file(map_fname)
     params.input.input_map.map_coeff_file = params.output.output_file_name_prefix+"_pprobe_maps.mtz"
+  else:
+    #setup input map coefficients
+    map_coeff = reflection_file_utils.extract_miller_array_from_file(
+      file_name = params.input.input_map.map_coeff_file,
+      label     = params.input.input_map.map_diff_label,
+      type      = "complex",
+      log       = null_log)
+    if params.input.parameters.score_res is None:
+      params.input.parameters.score_res = f_obs.d_min()
+      print >> log, "  Determined Resolution Limit: %.2f" % params.input.parameters.score_res
+      print >> log, "    -->Override with \"score_res=XXX\""
+    map_fname = params.input.input_map.map_coeff_file
+    
+
 
   # if peaks not input, find and write to pdb
   if params.input.pdb.peaks_pdb is None:
-    peaks = find_map_peaks(params,strip_xrs,log)
-    pdb_str = peaks_pdb_str(peaks)
+    peaks_result = find_map_peaks(params,strip_xrs,log)
+    pdb_str = peaks_pdb_str(peaks_result)
     peak_pdb = iotbx.pdb.input(source_info=None, lines=flex.split_lines(pdb_str))
     peak_hier = peak_pdb.construct_hierarchy()
     peak_filename =params.output.output_file_name_prefix+"_pprobe_peaks.pdb" 
@@ -299,12 +360,22 @@ def process_inputs(args, log = sys.stdout):
     f.close()
     params.input.pdb.peaks_pdb = peak_filename
 
+  #Wrap up, display file names and info for manual input
+  #save parameters for next stage
+  new_phil = working_phil.format(python_object = params)
+  phil_fname = params.output.output_file_name_prefix+"_pprobe.param" 
+  f = open(phil_fname, "w")
+  f.write(new_phil.as_str())
+  f.close()
   print >> log, "_"*79
   print >> log, "Inputs Processed, final files:"
   print >> log, "   Model PDB: ",params.input.pdb.model_pdb
   print >> log, "   Strip PDB: ",params.input.pdb.strip_pdb
   print >> log, "   Peaks PDB: ",params.input.pdb.peaks_pdb
   print >> log, "   Map Coeff: ",map_fname
+  print >> log, "   Resolution: %.2f" % params.input.parameters.score_res
+  print >> log, "   Params: ",phil_fname
+  #also return params
   return params
 
 
@@ -328,12 +399,13 @@ def find_map_peaks(params,strip_xrs,log):
     use_all_data = True,
     map_coeffs=map_coeff,
     log=log)
-  peaks_result.peaks_mapped()#cluter found peaks?
+  peaks_result.peaks_mapped()#cluter/arrange found peaks?
   peaks = peaks_result.peaks()#returns heights,coords(frac)
   unit_cell = strip_xrs.unit_cell()#need cell for cartesian
   peaks.sites = unit_cell.orthogonalize(peaks.sites)
   
   return peaks
+
 
 class fake_fmodel(object):
   #peak picking somehow needs an fmodel
@@ -355,7 +427,7 @@ def peaks_pdb_str(peaks):
     x,y,z = xyz
     b = peak
     #chain is set to "P" for peak
-    pdb_str = pdb_str+format_atom(serial,"O","","HOH","P",serial,"",x,y,x,1.0,b,"0","")
+    pdb_str = pdb_str+format_atom(serial,"O","","HOH","P",serial,"",x,y,z,1.0,b,"O","")
     serial = serial + 1
   return pdb_str
 
@@ -369,6 +441,7 @@ def format_atom(serial,name,alt,resname,chain,resid,ins,x,y,z,occ,temp,element,c
 def check_symmetry(inputs,params,log):
   #check for usable and consistent symmetry
   #somehow, this happens beforehand sometimes?
+  #inputs finds a symmetry object from somewhere?
   print >> log, "_"*79
   print >> log,"Checking Crystal Symmetry:"
   crystal_symmetry = None
@@ -433,6 +506,11 @@ def setup_reflection_data(inputs,params,crystal_symmetry,reflection_files,log):
     merged = r_free_flags.as_non_anomalous_array().merge_equivalents()
     r_free_flags = merged.array().set_observation_type(r_free_flags)
     f_obs, r_free_flags = f_obs.common_sets(r_free_flags)
+
+  if params.input.parameters.score_res is None:
+    params.input.parameters.score_res = f_obs.d_min()
+    print >> log, "  Determined Resolution Limit: %.2f" % params.input.parameters.score_res
+    print >> log, "    -->Override with \"score_res=XXX\""
   return f_obs,r_free_flags
 
 def create_strip_pdb(pdb_hier,pdb_xrs,omit_mode,log):
@@ -461,14 +539,9 @@ def create_strip_pdb(pdb_hier,pdb_xrs,omit_mode,log):
     print >> log, "     Omitted %d atoms total)" % n_selected
     strip_xrs = input_xrs.select(selection = keep_selection)
     strip_hier = input_hier.select(keep_selection)
-    strip_hier.write_pdb_file("fuck.pdb")
   return strip_xrs,strip_hier
 
 def create_pprobe_maps(f_obs,r_free_flags,params,strip_xrs,strip_hier,log):
-  #mmtbx.utils.setup_scattering_dictionaries(
-  #  scattering_table = params.maps.scattering_table,
-  #  xray_structure   = strip_xrs,
-  #  d_min            = f_obs.d_min())
   print >> log, "_"*79
   print >> log, "Creating Maps:"
   print >> log, "  Note, R-factors are with selected atoms removed!\n"

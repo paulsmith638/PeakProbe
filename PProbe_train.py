@@ -48,6 +48,10 @@ class TrainingFunctions:
           self.batch_da = ppcf.batch_da
           self.initialize_results = ppcf.initialize_results
           self.score_stats = ppcf.score_stats
+          self.peak_edc = ppcf.peak_edc
+          self.peak_fc = ppcf.peak_fc
+          self.peak_cc = ppcf.peak_cc
+          self.peak_sfp = ppcf.peak_sfp
           self.ppsel = ppcf.ppsel #inherit imported class?
 
           #option for speedup for code testing
@@ -152,17 +156,19 @@ class TrainingFunctions:
           bin_mask,num_bins = self.calc_res_bins(data_array,30,target_res_bin_width=0.075)
           for index,column in enumerate(col_names):
                data_column = data_array[column]
-               col_res,col_smean,col_wmean,col_sstd,col_wstd,col_std,col_tmean = [],[],[],[],[],[],[]
-               for population,selector in zip(('obss','obsw','all'),(selectors.inc_obss_bool,
-                                                                     selectors.inc_obsw_bool,
-                                                                     selectors.included_data_bool)):
+               col_res,col_smean,col_wmean,col_sstd,col_wstd,col_omean,col_ostd,col_std,col_tmean = [],[],[],[],[],[],[],[],[]
+               for population,selector in zip(('obss','obsw','obso','all'),(selectors.inc_obss_bool,
+                                                                            selectors.inc_obsw_bool,
+                                                                            np.logical_and(selectors.included_data_bool,
+                                                                                           np.invert(np.logical_or(selectors.inc_obss_bool,
+                                                                                                         selectors.inc_obsw_bool))),
+                                                                            selectors.included_data_bool)):
                     input_data = data_column[selector]
                     input_binmask = bin_mask[selector]
                     input_res = res[selector]
                     for i in np.arange(num_bins + 1):
                          input_data_bin=input_data[input_binmask == i]
                          res_bin=input_res[input_binmask == i]
-                         #if at least 10 peaks in the bin
                          bin_resmean = np.nanmean(res_bin)
                          #get std from entire population
                          if population == "all":
@@ -177,14 +183,19 @@ class TrainingFunctions:
                          if population == "obsw":
                               col_wmean.append(np.nanmean(input_data_bin))
                               col_wstd.append(np.nanstd(input_data_bin))
+                         if population == "obso":
+                              col_omean.append(np.nanmean(input_data_bin))
+                              col_ostd.append(np.nanstd(input_data_bin))
                #convert lists to np array
+               binres = np.array(col_res)
                binstd = np.array(col_std)
                binmean = np.array(col_tmean)
-               binres = np.array(col_res)
                mean_sval = np.array(col_smean)
                std_sval = np.array(col_sstd)
                mean_wval = np.array(col_wmean)
                std_wval = np.array(col_wstd)
+               mean_oval = np.array(col_omean)
+               std_oval = np.array(col_ostd)
                
                print "     FITTING RESOLUTION DEPENDENT SPLINE FUNCTIONS",column
 
@@ -211,10 +222,11 @@ class TrainingFunctions:
                     sub.scatter(binres,mean_sval,color='red')
                     sub.scatter(binres,binmean,color='black')
                     sub.scatter(binres,binstd,color='cyan')
+                    sub.scatter(binres,mean_oval,color='green')
                     ax2=sub.twinx()
                     sn=np.divide((np.power(np.subtract(mean_sval,mean_wval),2)),binstd**2)
                     ax2.set_ylim([0.0,np.clip(np.amax(sn),2.0,20.0)])
-                    ax2.plot(binres,sn,color='green')
+                    ax2.plot(binres,sn,color='yellow')
           if plot:
                if post_pca:
                     figname = "PCA_resfit.png"

@@ -26,6 +26,13 @@ class DataIO:
                                 ('llgS','f4'),('llgW','f4'),('chiS','f4'),('chiW','f4'),
                                 ('fchi','f4'),('kchi','f4'),('rc','i1')]
 
+          #contact feature structured array
+          self.cfeat_col =    ['id','ori','c1','c2','c3','ol','om','sl','sm','wl','wm','ot','st','wt',
+                               'psfp','weak','special','remote','sadc','badc','close']
+          self.cfeat_format = ['S16','S16',np.float32,np.float32,np.float32,
+                               np.int16,np.int16,np.int16,np.int16,np.int16,np.int16,np.int16,np.int16,np.int16,
+                               np.float32,np.bool_,np.bool_,np.bool_,np.bool_,np.bool_,np.bool_]
+          self.cfeat_dtype = np.dtype(zip(self.cfeat_col,self.cfeat_format))
 
 
      #reads sql database with all columns labeled from PProbe output
@@ -44,6 +51,19 @@ class DataIO:
           print "ROWS IN:",data_array.shape[0]
           return data_array
 
+     def extract_cfeat(self,features_list):
+          cfeat_array = []
+          for features in features_list:
+               raw_cf = features['contact_feat']
+               raw_fl = features['peak_flags']
+               data = tuple([features['db_id'],features['orires'],raw_cf[0],raw_cf[1],raw_cf[2],
+                             int(raw_cf[3]),int(raw_cf[4]),int(raw_cf[5]),int(raw_cf[6]),int(raw_cf[7]),
+                             int(raw_cf[8]),int(raw_cf[9]),int(raw_cf[10]),int(raw_cf[11]),
+                             features['fp_prob'],raw_fl['weak'],raw_fl['special'],raw_fl['remote'],raw_fl['sadc'],
+                             raw_fl['badc'],raw_fl['close']])
+               cfeat_array.append(data)
+          output_array = np.fromiter((row for row in cfeat_array),dtype=self.cfeat_dtype)
+          return output_array
 
 
      def extract_raw(self,features_list):

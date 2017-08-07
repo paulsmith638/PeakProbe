@@ -513,4 +513,197 @@ class ClassifierFunctions:
           plt.close()
 
 
+     def peak_edc(self,results_array):
+          #function to assign electron density class
+          #1-8, 1=best s, 8=best water
+
+
+          #cutoffs for "good" values for llg and chisq (empirical)
+          #cutoffs for score/chi S/W
+          gss_cut = -3.0
+          gsc_cut = 65
+          gws_cut = -3.0
+          gwc_cut = 55
+
+          preds = results_array['score'] > 0.0
+          goods_ss = results_array['llgS'] > gss_cut
+          goods_sc = results_array['chiS'] < gsc_cut
+          ps_gs = np.logical_and(preds,goods_ss)
+          ps_gc = np.logical_and(preds,goods_sc)
+          
+          predw = np.invert(preds)
+          goodw_ws = results_array['llgW'] > gws_cut
+          goodw_wc = results_array['chiW'] < gwc_cut
+          pw_gs = np.logical_and(predw,goodw_ws)
+          pw_gc = np.logical_and(predw,goodw_wc)
+
+          good_score = np.logical_or(ps_gs,pw_gs)
+          good_chi = np.logical_or(ps_gc,pw_gc)
+
+          logical_ass = np.zeros((results_array.shape[0],3),dtype=np.bool_)
+          logical_ass[:,0] = preds
+          logical_ass[:,1] = good_score
+          logical_ass[:,2] = good_chi
+
+          #explicit def of all edc
+          edc = np.zeros(results_array.shape[0],dtype = np.int16)
+          edc1 =(logical_ass == (1,1,1)).all(axis=1) #preds,goods,goodc --> good S
+          edc2 =(logical_ass == (1,0,1)).all(axis=1) #preds,bads,goodc --> weak S
+          edc3 =(logical_ass == (1,1,0)).all(axis=1) #preds,goods,badc --> bad S
+          edc4 =(logical_ass == (1,0,0)).all(axis=1) #preds,bads,badc --> really bad S
+          edc5 =(logical_ass == (0,0,0)).all(axis=1) #predw,bads,badc --> really bad W
+          edc6 =(logical_ass == (0,1,0)).all(axis=1) #predw,goods,badc --> bad W
+          edc7 =(logical_ass == (0,0,1)).all(axis=1) #predw,bads,goodc --> weak W
+          edc8 =(logical_ass == (0,1,1)).all(axis=1) #predw,goods,goodc --> good W
+
+          for edc_ind,selector in enumerate((edc1,edc2,edc3,edc4,
+                                             edc5,edc6,edc7,edc8)):
+               edc[selector] = edc_ind + 1
+
+          return edc
+
+     def peak_fc(self,cfeat_array):
+          #function to assign a class for various peak flags
+          # 0 = no flags
+          # 1 = special position
+          # 2 = very bad contacts
+          # 3 = bad contacts and one close contact
+          # 4 = bad contacts
+          # 5 = one close contact
+          # 6 = remote, far from any contact
+
+          flags_col=['weak','remote','close','special','badc','sadc']
+          flags_fmt = [np.bool_,np.bool_,np.bool_,np.bool_,np.bool_,np.bool_]
+          flags_dtype = np.dtype(zip(flags_col,flags_fmt))
+          flags_arr = cfeat_array[flags_col].view(dtype=flags_dtype)
+
+          flag_class = np.zeros(flags_arr.shape[0],dtype=np.int16)
+          sp_sel = flags_arr['special'] == True
+          badc_sel = flags_arr['badc'] == True
+          sadc_sel = flags_arr['sadc'] == True
+          close_sel = flags_arr['close'] == True
+          remote_sel = flags_arr['remote'] == True
+
+          #assign in rev order of precidence (remote cannot be special, special implies badc, etc.)
+          flag_class[remote_sel] = 6
+          flag_class[close_sel] = 5
+          flag_class[sadc_sel] = 4
+          flag_class[np.logical_and(sadc_sel,close_sel)] = 3
+          flag_class[badc_sel] = 2
+          flag_class[sp_sel] = 1
+
+
+          return flag_class
+
+     def peak_cc(self,results_array,cfeat_array):
+          #function to give a class for local contact environment
+          swt_cut = 0 # max contact close contact counts for refined w
+          wwt_cut = 1
+          sst_cut = 3
+          scl_cut = 2.8 #closest contact
+          wcl_cut = 2.0
+          #total short contacts to refined water position
+          wt = cfeat_array['wl'] + cfeat_array['wm'] 
+          st = cfeat_array['sl'] + cfeat_array['sm'] 
+
+          #probability of SO4 via contact data Random Forest          
+          cpred_s = cfeat_array['cprob'] > 0.8
+          cpred_w = np.invert(cpred_s)
+          goods_c1 = cfeat_array['c1'] > scl_cut
+          goodw_c1 = cfeat_array['c1'] > wcl_cut
+          goods_wt = wt <= swt_cut
+          goodw_wt = wt <= swt_cut
+
+          goods_wt = np.logical_and(cpred_s,wt <= swt_cut) #good s cont
+          goods_st = np.logical_and(cpred_s,st <= sst_cut)
+          goods_tc = np.logical_and(goods_wt,goods_st)
+          goodw_wt = np.logical_and(cpred_w,wt <= wwt_cut) #good w cont
+          goods_cl = np.logical_and(cpred_s,cfeat_array['c1'] > scl_cut) #good close s cont
+          goodw_cl = np.logical_and(cpred_w,cfeat_array['c1'] > wcl_cut) #good close w cont
+          good_wt = np.logical_or(goods_tc,goodw_wt)
+          good_cl = np.logical_or(goods_cl,goodw_cl)
+
+
+          lcprob = cfeat_array['cprob']
+
+          #logical_ass = np.zeros((results_array.shape[0],3),dtype=np.bool_)
+          #logical_ass[:,0] = cpred_s #contact prob
+          #logical_ass[:,1] = good_wt #good wt score for assigned class
+          #logical_ass[:,2] = good_cl #good close contact for assigned class
+
+          c_class = np.zeros(results_array.shape[0],dtype=np.int16)
+          #cc1 =(logical_ass == (1,1,1)).all(axis=1) #cpreds,good, good 
+          #cc2 =(logical_ass == (1,1,0)).all(axis=1) #cpreds, good, bad close
+          #cc3 =(logical_ass == (1,0,1)).all(axis=1) #cpreds, bad contact env, good close
+          #cc4 =(logical_ass == (1,0,0)).all(axis=1) #cpreds, bad contacts
+          #cc5 =(logical_ass == (0,1,1)).all(axis=1) #cpredw bad all round
+          #cc6 =(logical_ass == (0,0,1)).all(axis=1) #cpredw,bad env
+          #cc7 =(logical_ass == (0,1,0)).all(axis=1) #cpredw, bad close contact
+          #cc8 =(logical_ass == (0,1,1)).all(axis=1) #cpredw,good contacts
+
+          cc1 = lcprob < 1.01
+          cc2 = lcprob < 0.99
+          cc3 = lcprob < 0.98
+          cc4 = lcprob < 0.90
+          cc5 = lcprob < 0.80
+          cc6 = lcprob < 0.60
+          cc7 = lcprob < 0.40
+          cc8 = lcprob < 0.20
+
+
+
+
+
+          for cc_ind,selector in enumerate((cc1,cc2,cc3,cc4,
+                                            cc5,cc6,cc7,cc8)):
+               c_class[selector] = cc_ind + 1
+
+          return c_class
+
+
+     def peak_sfp(self,psfp_array):
+          #looks at two random forest classifiers
+          #for false positives, one on density, one on contacts
+
+          pos_cpsfp = psfp_array['cpsfp'] > 0.65
+          pos_epsfp = psfp_array['epsfp'] > 0.40
+          comp_psfp = np.multiply(psfp_array['cpsfp'],psfp_array['epsfp'])
+          perfect_comp = comp_psfp == 1.0 # perfect score
+          pos_comp = comp_psfp > 0.95 # very good composite score
+
+          fp_lc = np.zeros((psfp_array.shape[0],7),dtype=np.bool_)
+          fp_lc[:,0] = comp_psfp == 1.0 #both fp scores = 1.0
+          fp_lc[:,1] = psfp_array['epsfp'] == 1.0
+          fp_lc[:,2] = psfp_array['cpsfp'] == 1.0
+          fp_lc[:,3] = comp_psfp > 0.8
+          fp_lc[:,4] = psfp_array['cpsfp'] < 0.5
+          fp_lc[:,5] = psfp_array['cpsfp'] < 0.2
+          fp_lc[:,6] =  psfp_array['cpsfp'] == 0
+
+
+          fp_class = np.zeros(psfp_array.shape[0],dtype=np.int16) + 5 #assign default of 5
+          fpc1 =(fp_lc == (1,1,1,1,0,0,0)).all(axis=1) #perfect TP score
+          fpc2 =(fp_lc == (0,0,1,1,0,0,0)).all(axis=1) #only perfect efp score
+          fpc3 =(fp_lc == (0,1,0,1,0,0,0)).all(axis=1) #only perfect cfp score
+          fpc4 =(fp_lc == (0,0,0,1,0,0,0)).all(axis=1) #good composite score
+          fpc5 =(fp_lc == (0,0,0,0,1,1,0)).all(axis=1) #catchall -- neither
+          fpc6 =(fp_lc == (0,0,0,0,1,0,0)).all(axis=1) #low csfp score
+          fpc7 =(fp_lc == (0,0,0,0,1,1,0)).all(axis=1) #very low csfp score
+          fpc8 =(fp_lc == (0,0,0,0,1,1,1)).all(axis=1) #perfect FP score
+
+
+
+          for fpc_ind,selector in enumerate((fpc1,fpc2,fpc3,fpc4,fpc5,fpc6,fpc7,fpc8)):
+               fp_class[selector] = fpc_ind + 1
+
+
+          #total = 0
+          #for i in range(9):
+          #     print "FP CLASS COUNT",i,np.count_nonzero(fp_class == i)
+          #     total = total + np.count_nonzero(fp_class == i)
+          #print "TOTAL",total,psfp_array.shape[0]
+
+
+          return fp_class
+
 
