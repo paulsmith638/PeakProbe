@@ -21,7 +21,7 @@ from PProbe_matrix import PCA
 #functions used in resolution dependent scaling schemes
 class TrainingFunctions:
      def __init__(self,verbose=False,fastmode=False):
-          ppcf = ClassifierFunctions(verbose=True)
+          ppcf = ClassifierFunctions(verbose=True,train=True)
           ppstat = StatFunc()
           pppca = PCA()
           #function from classifier needed here
@@ -33,6 +33,7 @@ class TrainingFunctions:
           self.get_stats=ppcf.get_stats
           self.spline_basis = ppstat.spline_basis
           self.spline4k = ppstat.spline4k
+          self.norm_pdf = ppstat.norm_pdf
           self.modal_matrix = pppca.modal_matrix
           self.pca_by_bin = pppca.pca_by_bin
           self.eig_sort = pppca.eig_sort
@@ -44,14 +45,12 @@ class TrainingFunctions:
           self.xform_data = ppcf.xform_data
           self.standardize_data = ppcf.standardize_data
           self.pca_xform_data = ppcf.pca_xform_data
-          self.discriminant_analysis = ppcf.discriminant_analysis
-          self.batch_da = ppcf.batch_da
-          self.initialize_results = ppcf.initialize_results
+          self.density_da = ppcf.density_da
           self.score_stats = ppcf.score_stats
+          self.contact_da = ppcf.contact_da
           self.peak_edc = ppcf.peak_edc
           self.peak_fc = ppcf.peak_fc
           self.peak_cc = ppcf.peak_cc
-          self.peak_sfp = ppcf.peak_sfp
           self.ppsel = ppcf.ppsel #inherit imported class?
 
           #option for speedup for code testing
@@ -84,6 +83,8 @@ class TrainingFunctions:
           #pass initial values and restraints
           #initial values is 4xfloat
           #if restraints is True, values are restrained to these initial values
+          xval = xval
+          yval = yval
           if ivals is not None:
                initial = np.array(ivals)
           else:
@@ -97,7 +98,48 @@ class TrainingFunctions:
                L = op.fmin_l_bfgs_b(self.johnsonsu_target,initial,args=(xval,yval),
                                     bounds=constraints,approx_grad=True,disp=False)
           return L[0] #just return fitted parameters
-     
+  
+     def logit_target(self,par_wt,data_array,labels):
+          #labels are 1/0 T/F or bool
+          param = par_wt[0:-1:1]
+          weight = par_wt[-1]
+          invl = np.invert(labels)
+          pred = self.logit_prob(data_array,param)
+          preds = pred > 0.5
+          cnz = lambda sel: np.count_nonzero(sel)
+          ntpsel = np.logical_and(labels,preds)
+          ntnsel = np.logical_and(np.invert(labels),np.invert(preds))
+          nfpsel = np.logical_and(np.invert(labels),preds)
+          nfnsel = np.logical_and(labels,np.invert(preds))
+          ppv = float(cnz(ntpsel))/(cnz(ntpsel)+cnz(nfpsel))
+          rec = float(cnz(ntpsel))/(cnz(ntpsel)+cnz(nfnsel))
+          f1 = 2.0*ppv*rec/(ppv+rec)
+          normP = np.dot(param,param.T)
+          normW = weight**2
+          norm = normP + normW
+          regT = np.nansum((self.logit_prob(param,data_array[labels]) - labels[labels]*weight)**2)
+          regF = np.nansum((self.logit_prob(param,data_array[invl]))**2)
+          print "TARGET",normP,normW,regT,regF,par_wt
+          tot = norm + regT + regF
+          print ppv,rec,f1
+          return tot/(f1**2)
+
+     def fit_logit(self,data_array,labels):
+          initial = np.ones(data_array.shape[1]+1)
+          L = op.fmin_bfgs(self.logit_target,initial,args=(data_array,labels),disp=False)
+          print L
+          return L
+
+     def logit_prob(self,param,lrdata):
+          lrp = 1.0/(1.0 + np.exp(-(np.dot(param,lrdata.T))))
+          return lrp
+
+     def setup_logit(self,data_array,col_list):
+          lrdata=np.ones((data_array.shape[0],len(col_list)+1),dtype=np.float64)
+          for index,column in enumerate(col_list):
+               lrdata[:,index+1] = data_array[column]
+          return lrdata
+
 
      """
      SPLINE fitting, currently fixed at 4 internal knots
@@ -105,18 +147,22 @@ class TrainingFunctions:
 
      def spline4k_target(self,param,xval,yval):
           #includes L1 norm
-          return np.nansum(np.abs(param)) + 1000.0*np.nansum((yval - self.spline4k(param,xval))**2) 
+          param = param.astype(np.float64)
+          target = np.nansum(np.abs(param)) + 1000.0*np.nansum((yval - self.spline4k(param,xval))**2) 
+          return target.astype(np.float64)
 
 
      def spline4k_fit(self,xval,yval,augment=False):
-          initial = np.ones(6)
+          initial = np.ones(6,dtype=np.float64)
+          xval = xval.astype(np.float64)
+          yval = yval.astype(np.float64)
           if augment:
                #appends point and start and end of array equal to lowest/highest value
                #at 0.3 and 5.0 resolution to keep spline fitting from going off the rails
                #would be better to use a spline with defined slopes past the knots
 
-               axval = np.zeros(xval.shape[0] + 2)
-               ayval = np.zeros(xval.shape[0] + 2)
+               axval = np.zeros(xval.shape[0] + 2,dtype=np.float64)
+               ayval = np.zeros(xval.shape[0] + 2,dtype=np.float64)
                for index in np.arange(1,xval.shape[0]+1,1):
                     axval[index] = xval[index-1]
                     ayval[index] = yval[index-1]
@@ -138,7 +184,7 @@ class TrainingFunctions:
      4) resolution dep jsu pdf coefficients for discriminant analysis
      """
 
-     def calculate_res_scales(self,data_array,post_pca=False,plot=False):
+     def calculate_res_scales(self,data_array,post_pca=False,composite=False,plot=False):
           """
           calculates mean/sigma in a resolution variant scheme for a given training set
           data array must be numpy structured array with correct feature names
@@ -146,11 +192,20 @@ class TrainingFunctions:
           scales_dict = {}
           selectors = self.ppsel(data_array)
           if post_pca:
-               col_names=selectors.pca_view_col
+               if composite:
+                    col_names = ['score','cscore']
+               else:
+                    col_names=selectors.pca_view_col
           else:
                col_names = selectors.std_view_col
+          for x_stat in col_names:
+               cull = np.isnan(data_array[x_stat])
+               print "CULL",x_stat,np.count_nonzero(cull)
+               data_array = data_array[np.invert(cull)]
+
           print "RESOLUTION DEPENDENT SCALING"
           res = data_array['res']
+          res = np.clip(res,0.6,5.0).astype(np.float16)
           if plot:
                gridplot = plt.figure(figsize=(24,16))
           bin_mask,num_bins = self.calc_res_bins(data_array,30,target_res_bin_width=0.075)
@@ -167,25 +222,32 @@ class TrainingFunctions:
                     input_binmask = bin_mask[selector]
                     input_res = res[selector]
                     for i in np.arange(num_bins + 1):
-                         input_data_bin=input_data[input_binmask == i]
-                         res_bin=input_res[input_binmask == i]
-                         bin_resmean = np.nanmean(res_bin)
+                         bin_select = input_binmask == i
+                         bincount = np.count_nonzero(bin_select)
+                         if bincount < 10:
+                              if i == 0:
+                                   bin_select = np.logical_or(bin_select,input_binmask == i+1)
+                              else:
+                                   bin_select = np.logical_or(bin_select,input_binmask == i-1)
+                         input_data_bin=input_data[bin_select]
+                         res_bin=input_res[bin_select]
+                         bin_resmean = np.nanmean(res_bin,dtype=np.float64)
                          #get std from entire population
                          if population == "all":
                               col_res.append(bin_resmean)
-                              col_std.append(np.nanstd(input_data_bin))
-                              col_tmean.append(np.nanmean(input_data_bin))
+                              col_std.append(np.nanstd(input_data_bin,dtype=np.float64))
+                              col_tmean.append(np.nanmean(input_data_bin,dtype=np.float64))
                          #mean of obsss
                          if population == "obss":
-                              col_smean.append(np.nanmean(input_data_bin))
-                              col_sstd.append(np.nanstd(input_data_bin))
+                              col_smean.append(np.nanmean(input_data_bin,dtype=np.float64))
+                              col_sstd.append(np.nanstd(input_data_bin,dtype=np.float64))
                          #mean of obsw
                          if population == "obsw":
-                              col_wmean.append(np.nanmean(input_data_bin))
-                              col_wstd.append(np.nanstd(input_data_bin))
+                              col_wmean.append(np.nanmean(input_data_bin,dtype=np.float64))
+                              col_wstd.append(np.nanstd(input_data_bin,dtype=np.float64))
                          if population == "obso":
-                              col_omean.append(np.nanmean(input_data_bin))
-                              col_ostd.append(np.nanstd(input_data_bin))
+                              col_omean.append(np.nanmean(input_data_bin,dtype=np.float64))
+                              col_ostd.append(np.nanstd(input_data_bin,dtype=np.float64))
                #convert lists to np array
                binres = np.array(col_res)
                binstd = np.array(col_std)
@@ -201,7 +263,12 @@ class TrainingFunctions:
 
                # after PCA,take bin mean as average of s and w populations (centers data)
                if post_pca:
-                    binmean = np.divide(mean_wval + mean_sval,2.0)
+                    if composite:
+                         bin_diff = np.abs(np.subtract(mean_sval,mean_wval))
+                         binmean = np.divide(mean_wval + mean_sval,2.0)
+                         binstd = bin_diff/binstd
+                    else:
+                         binmean = np.divide(mean_wval + mean_sval,2.0)
                mean_spline_coeff = self.spline4k_fit(binres,binmean,augment=True)
                #sig must be positive, fit log sigma
                log_sig_spline_coeff = self.spline4k_fit(binres,np.log(binstd),augment=True)
@@ -209,7 +276,10 @@ class TrainingFunctions:
 
                #plotting functions to test fit
                if plot:
-                    sub = gridplot.add_subplot(4,5,index+1)
+                    if composite:
+                         sub = gridplot.add_subplot(1,2,index+1)
+                    else:
+                         sub = gridplot.add_subplot(4,5,index+1)
                     plot_xval = np.linspace(0.5,5.0,100)
                     mean_plot_spline = self.spline4k(mean_spline_coeff,plot_xval)
                     sig_plot_spline = np.exp(self.spline4k(log_sig_spline_coeff,plot_xval))
@@ -226,23 +296,20 @@ class TrainingFunctions:
                     ax2=sub.twinx()
                     sn=np.divide((np.power(np.subtract(mean_sval,mean_wval),2)),binstd**2)
                     ax2.set_ylim([0.0,np.clip(np.amax(sn),2.0,20.0)])
-                    ax2.plot(binres,sn,color='yellow')
+                    ax2.plot(binres,sn,color='fuchsia')
           if plot:
                if post_pca:
-                    figname = "PCA_resfit.png"
+                    if composite:
+                         figname = "COMPOSITE_resfit.png"
+                    else:
+                         figname = "PCA_resfit.png"
                else:
                     figname = "DATA_resfit.png"
                plt.savefig(figname)
                plt.clf()
                plt.close()
 
-          if post_pca:
-               filename = "pprobe_post_pca_resscales.dict"
-          else:
-               filename = "pprobe_pre_pca_resscales.dict"
-          f = open(filename,'w')
-          f.write(str(scales_dict))
-          f.close()
+          return scales_dict
 
 
      def calc_res_pca(self,norm_data,plot=False):
@@ -309,7 +376,7 @@ class TrainingFunctions:
                                   transform=sub.transAxes,fontsize=12)
                          sub.set_xlim([0.5,5.0])
                          maxval=np.amax(np.absolute(yval))
-                         plot_ylim = np.clip(maxval,1.0,np.inf)
+                         plot_ylim = np.clip(maxval,0.3,np.inf)
                          sub.set_ylim([-plot_ylim,plot_ylim])
                          sub.scatter(xval,yval)
                          sub.plot(fitxval,fityval)
@@ -325,10 +392,7 @@ class TrainingFunctions:
           for i in range(pca_coeffs.shape[0]):
                for j in range(pca_coeffs.shape[1]):
                     pca_coeffs_dict[str(i)+"_"+str(j)] = tuple(pca_coeffs[i,j])
-          f = open("pprobe_pca_matrix_coeff.dict",'w')
-          print "WRITING PCA COEFFICIENTS"
-          f.write(str(pca_coeffs_dict))
-          f.close()
+          return pca_coeffs_dict
 
 
      def check_decorr(self,norm_data,pca_data,plot=False):
@@ -346,7 +410,7 @@ class TrainingFunctions:
                n_databin = selected_norm_data[ressel]
                p_databin = selected_pca_data[ressel]
                res_block=res[ressel]
-               calc_modal = self.gen_xform_mat(np.nanmean(res_block))
+               calc_modal = self.gen_xform_mat(np.nanmean(res_block,dtype=np.float64))
                #untransformed data transformed locally
                block_n_corr = np.corrcoef(n_databin.T)
                block_modal,l,v = np.linalg.svd(block_n_corr)
@@ -425,8 +489,9 @@ class TrainingFunctions:
           for i in range(binno + 1):
                binsize = np.count_nonzero(bin_mask == i)
                no_so4 = np.count_nonzero(np.logical_and(selectors.inc_obss_bool,bin_mask==i))
-               binres = np.nanmean(data_array['res'][bin_mask == i])
-               print "    BIN %3s SIZE %7s SO4 %6s RES %4.2f" % (i,binsize,no_so4,binres)
+               no_wat = np.count_nonzero(np.logical_and(selectors.inc_obsw_bool,bin_mask==i))
+               binres = np.nanmean(data_array['res'][bin_mask == i],dtype=np.float64)
+               print "    BIN %3s SIZE %7d SO4 %6d WAT %6d RES %4.2f" % (i,binsize,no_so4,no_wat,binres)
           return bin_mask,binno
 
      def calc_jsu_coeff(self,data_array,plot=False):
@@ -461,7 +526,6 @@ class TrainingFunctions:
                if resbin == 0:
                     sfit_list,wfit_list,res_list = self.pop_fit_jsu(selected_data,plot=plot)
                     swinit[0],swinit[1] = sfit_list,wfit_list #store fitted values
-                    print "INITIAL FIT RX0",swinit[0][0],swinit[1][0]
                else:
                     sfit_list,wfit_list,res_list = self.pop_fit_jsu(selected_data,swivals=swinit,
                                                                     restrain=True,plot=plot)
@@ -543,32 +607,11 @@ class TrainingFunctions:
                gridplot_w.savefig("jsu_coeff_w.png")
                plt.close()
 
-          f = open("pprobe_jsu_coeffs.dict",'w')
-          f.write(str(jsu_coeff_dict))
-          f.close()
+          return jsu_coeff_dict
   
-    
-     def sn_plot(self):
-          #calculates Fisher's linear discriminant vs. resolution
-          #based on the Jsu pdf's from the data
-          gridplot = plt.figure(figsize=(24,8))
-          xplot = np.linspace(0.5,5.0,100)
-          sn_sum = np.zeros(xplot.shape)
-          for index in range(19):
-               s_pdf_coeff,w_pdf_coeff=self.get_jsu_coeffs(index,xplot)
-               s_means,s_var = self.johnsonsu_stats(s_pdf_coeff)
-               w_means,w_var = self.johnsonsu_stats(w_pdf_coeff)
-               sn=((s_means-w_means)**2)/(s_var + w_var)
-               sn_sum=sn_sum+sn
-               sub = gridplot.add_subplot(4,5,index+1)
-               sub.set_ylim([0.0,np.clip(np.amax(sn),2.0,np.inf)])
-               sub.plot(xplot,sn)
-               sub.set_title("SN_"+str(index))
-          sub=gridplot.add_subplot(4,5,20)
-          #total SN as addition?
-          sub.plot(xplot,sn_sum)
-          gridplot.savefig("sn_plot.png")
-          plt.close()
+  
+          
+
 
      def pop_fit_jsu(self,data_array,swivals=None,restrain=False,plot=False):
           #fits a batch of data containing both so4 and water
@@ -577,6 +620,11 @@ class TrainingFunctions:
           selectors = self.ppsel(data_array)
           obss_sel=selectors.inc_obss_bool
           obsw_sel=selectors.inc_obsw_bool
+          #if something goes wrong (usually with incomplete training data)
+          if np.count_nonzero(obss_sel) == 0 or np.count_nonzero(obsw_sel) == 0:
+               if swivals is not None:
+                    return swivals[0],swivals[1],[np.nanmean(data_array['res'],dtype=np.float64),]
+
           res_data=data_array['res']
           col_list = selectors.pca_view_col
           if plot:
@@ -591,18 +639,21 @@ class TrainingFunctions:
           for index,column in enumerate(col_list):
                input_column=data_array[column]
                #set sensible histogram limits
-               slow = np.percentile(input_column[obss_sel],0.1)
-               wlow = np.percentile(input_column[obsw_sel],0.1)
-               shigh = np.percentile(input_column[obss_sel],99.9)
-               whigh = np.percentile(input_column[obsw_sel],99.9)
+               slow = np.percentile(input_column[obss_sel],0.1).astype(np.float64)
+               wlow = np.percentile(input_column[obsw_sel],0.1).astype(np.float64)
+               shigh = np.percentile(input_column[obss_sel],99.9).astype(np.float64)
+               whigh = np.percentile(input_column[obsw_sel],99.9).astype(np.float64)
                #old formula for calculating binwidth
-               sbinw = np.nanstd(input_column[obss_sel])*np.power(42.5/no_so4,0.33)
-               wbinw = np.nanstd(input_column[obsw_sel])*np.power(42.5/no_wat,0.33)
+               sbinw = np.nanstd(input_column[obss_sel],dtype=np.float64)*np.power(42.5/no_so4,0.33)
+               wbinw = np.nanstd(input_column[obsw_sel],dtype=np.float64)*np.power(42.5/no_wat,0.33)
                #divide range by binwidth, clip to reasonable number of points
-               sbins = np.clip(int((shigh-slow)/sbinw),20,100)
-               wbins = np.clip(int((whigh-wlow)/wbinw),20,100)
-               obss_hist,obss_bins = np.histogram(input_column[obss_sel],bins=sbins,density=True,range=(slow,shigh))
-               obsw_hist,obsw_bins = np.histogram(input_column[obsw_sel],bins=wbins,density=True,range=(wlow,whigh))
+               try:
+                    sbins = np.clip(int((shigh-slow)/sbinw),20,100)
+                    wbins = np.clip(int((whigh-wlow)/wbinw),20,100)
+                    obss_hist,obss_bins = np.histogram(input_column[obss_sel],bins=sbins,density=True,range=(slow,shigh))
+                    obsw_hist,obsw_bins = np.histogram(input_column[obsw_sel],bins=wbins,density=True,range=(wlow,whigh))
+               except:
+                    continue
                #calculates average of bin edges for fitting
                if swivals:
                     if restrain:
@@ -621,7 +672,7 @@ class TrainingFunctions:
 
                sfit_list.append(sfit)
                wfit_list.append(wfit)
-               res_list.append(np.nanmean(data_array['res']))
+               res_list.append(np.nanmean(data_array['res'],dtype=np.float64))
 
                if plot: 
                     xdata=np.linspace(np.amin((slow,wlow))-1.0,np.amax((shigh,whigh))+1.0,100)
@@ -645,11 +696,26 @@ class TrainingFunctions:
                     sub.text(0.95,0.55,"%.2f %.2f %.2f %.2f" % tuple(wfit),verticalalignment='bottom',
                              horizontalalignment='right',transform=sub.transAxes,fontsize=10,color='blue')
           if plot:
-               plt_str = str(res_list[-1])[0:4]
-               plt.savefig("JSU_FITS_"+plt_str+".png")
-               plt.clf()
-               plt.close()
+               try:
+                    plt_str = str(res_list[-1])[0:4]
+                    plt.savefig("JSU_FITS_"+plt_str+".png")
+                    plt.clf()
+                    plt.close()
+               except:
+                    pass
           return sfit_list,wfit_list,res_list     
+
+     def composite_jsu_coeff(self,data_array,plot=False):
+          composite_dict = {}
+          composite_cols = ['res','ori','score','cscore']
+          composite_format = (np.float32,'S16',np.float32,np.float32)
+          composite_dtype = np.dtype(zip(composite_cols,composite_format))
+          composite_array = np.zeros(data_array.shape[0],dtype = composite_dtype)
+          for column in composite_cols:
+               composite_array[column] = data_array[column]
+          comp_scales = self.calculate_res_scales(composite_array,post_pca=True,composite=True,plot=plot)  
+          return comp_scales
+
                            
           
      def population_dist_stats(self,data_array):
@@ -669,12 +735,12 @@ class TrainingFunctions:
                     ssel = selectors.inc_obss_bool[bin_mask==i]
                     wsel = selectors.inc_obsw_bool[bin_mask==i]
                     res_bin=res[bin_mask == i]
-                    bin_resmean = np.nanmean(res_bin)
+                    bin_resmean = np.nanmean(res_bin,dtype=np.float64)
                     res_list.append(bin_resmean)
-                    smean_list.append(np.nanmean(input_data_bin[ssel]))
-                    wmean_list.append(np.nanmean(input_data_bin[wsel]))
-                    sstd_list.append(np.nanstd(input_data_bin[ssel]))
-                    wstd_list.append(np.nanstd(input_data_bin[wsel]))
+                    smean_list.append(np.nanmean(input_data_bin[ssel],dtype=np.float64))
+                    wmean_list.append(np.nanmean(input_data_bin[wsel],dtype=np.float64))
+                    sstd_list.append(np.nanstd(input_data_bin[ssel],dtype=np.float64))
+                    wstd_list.append(np.nanstd(input_data_bin[wsel],dtype=np.float64))
                     s_pdf_coeff,w_pdf_coeff=self.get_jsu_coeffs(index,bin_resmean)
                     sstats = self.johnsonsu_stats(s_pdf_coeff)
                     wstats = self.johnsonsu_stats(w_pdf_coeff)
@@ -700,7 +766,7 @@ class TrainingFunctions:
                sub.scatter(xval,wjmean,color='blue',alpha=0.5)
                sub.scatter(xval,sjstd,color='magenta',alpha=0.5)
                sub.scatter(xval,wjstd,color='cyan',alpha=0.5)
-               total_means = [np.nanmean(x) for x in (smean,sjmean,sstd,sjstd,wmean,wjmean,wstd,wjstd)]
+               total_means = [np.nanmean(x,dtype=np.float64) for x in (smean,sjmean,sstd,sjstd,wmean,wjmean,wstd,wjstd)]
                print "MEANS COLUMN S jS sS jsS W jW sW sjW",column,list('{:.2f}'.format(x) for x in total_means)
                
 
@@ -709,3 +775,174 @@ class TrainingFunctions:
           plt.close()
 
                
+     def contact_jsu(self,data_array,plot=False):
+          """
+          Fits distributions of first contact distance and local environment to JSU distributions
+          (not-resolution scaled) and stores coefficients as dictionary
+          Requires c1,charge(unscaled),and results data from discriminant analysis
+          """
+
+          print "FITTING CONTACT DATA",data_array.shape[0]
+          selectors = self.ppsel(data_array)
+          ssel = selectors.inc_obss_bool
+          wsel = selectors.inc_obsw_bool
+          if plot:
+               gridplot = plt.figure(figsize=(8,8))
+
+          #histogram binning
+          no_so4 = np.count_nonzero(ssel)
+          no_wat = np.count_nonzero(wsel)
+          coeff_dict = {}
+          for index,column in enumerate(('charge','c1')):
+               input_column=data_array[column].astype(np.float64)
+               #clip outliers
+               lcut = np.percentile(input_column,0.01)
+               hcut = np.percentile(input_column,99.99)
+               selr = np.logical_and(input_column > lcut,input_column < hcut)
+               input_column = input_column[selr]
+               col_ssel = ssel[selr]
+               col_wsel = wsel[selr]
+               print "  S/W Sel",column,np.count_nonzero(col_ssel),np.count_nonzero(col_wsel)
+               print "  Outliers Excluded",column,np.count_nonzero(np.invert(selr))
+               #compute means and store, normalize
+               col_smean = np.nanmean(input_column[col_ssel],dtype=np.float64)
+               col_wmean = np.nanmean(input_column[col_wsel],dtype=np.float64)
+               colstd = np.nanstd(input_column,dtype=np.float64)
+               print "CONTACT STATS",column,col_smean,col_wmean,colstd
+               balmean = (col_smean + col_wmean)/2.0
+               coeff_dict["mean_"+column] = balmean
+               coeff_dict["std_"+column] = colstd
+               input_column = np.divide(np.subtract(input_column,balmean),colstd)
+
+               #set histogram limits
+               slow = np.percentile(input_column[col_ssel],0.2)
+               wlow = np.percentile(input_column[col_wsel],0.2)
+               shigh = np.percentile(input_column[col_ssel],99.9)
+               whigh = np.percentile(input_column[col_wsel],99.9)
+               sbinw = np.nanstd(input_column[col_ssel],dtype=np.float64)*np.power(42.5/no_so4,0.33)
+               wbinw = np.nanstd(input_column[col_wsel],dtype=np.float64)*np.power(42.5/no_wat,0.33)
+               #divide range by binwidth, clip to reasonable number of points
+               sbins = np.clip(int((shigh-slow)/sbinw),20,100)
+               wbins = np.clip(int((whigh-wlow)/wbinw),20,100)
+               obss_hist,obss_bins = np.histogram(input_column[col_ssel],bins=sbins,density=True,range=(slow,shigh))
+               obsw_hist,obsw_bins = np.histogram(input_column[col_wsel],bins=wbins,density=True,range=(wlow,whigh))
+
+               
+               sfit =  self.fit_jsu(((obss_bins[:-1] + obss_bins[1:]) / 2.0),obss_hist)
+               wfit =  self.fit_jsu(((obsw_bins[:-1] + obsw_bins[1:]) / 2.0),obsw_hist)
+               coeff_dict["sfit_"+column] = list(sfit)
+               coeff_dict["wfit_"+column] = list(wfit)
+
+               if plot: 
+                    xdata=np.linspace(np.amin((slow,wlow))-1.0,np.amax((shigh,whigh))+1.0,100)
+                    sub = gridplot.add_subplot(2,1,index+1)
+                    splot_bins = obss_hist.shape[0]
+                    wplot_bins = obsw_hist.shape[0]
+                    sub.plot(xdata,self.johnsonsu_pdf(xdata,sfit[0],sfit[1],sfit[2],sfit[3]),'r-')
+                    sub.plot(xdata,self.johnsonsu_pdf(xdata,wfit[0],wfit[1],wfit[2],wfit[3]),'b-')
+                    sub.hist(input_column[col_ssel], normed=True, bins=splot_bins,color="red",alpha=0.5)
+                    sub.hist(input_column[col_wsel], normed=True, bins=wplot_bins,color="blue",alpha=0.5)
+                    sub.text(0.2,0.95,"%s" % column,verticalalignment='bottom',horizontalalignment='right',
+                             transform=sub.transAxes,fontsize=12)
+                    #sub.plot(xdata,self.norm_pdf(xdata))
+                    sstat = self.johnsonsu_stats(sfit)
+                    wstat = self.johnsonsu_stats(wfit)
+                    sub.text(0.99,0.95,"%.1f %.2f" % (sstat[0],np.sqrt(sstat[1])),verticalalignment='bottom',
+                             horizontalalignment='right',transform=sub.transAxes,fontsize=10,color='red')
+                    sub.text(0.99,0.92,"%.1f %.2f" % (wstat[0],np.sqrt(wstat[1])),verticalalignment='bottom',
+                             horizontalalignment='right',transform=sub.transAxes,fontsize=10,color='blue')
+                    sub.text(0.99,0.86,"%.2f %.2f %.2f %.2f" % tuple(sfit),verticalalignment='bottom',
+                             horizontalalignment='right',transform=sub.transAxes,fontsize=10,color='red')
+                    sub.text(0.99,0.83,"%.2f %.2f %.2f %.2f" % tuple(wfit),verticalalignment='bottom',
+                             horizontalalignment='right',transform=sub.transAxes,fontsize=10,color='blue')
+          if plot:
+               plt_str = "contacts"
+               plt.savefig("JSU_FITS_"+plt_str+".png")
+               plt.clf()
+               plt.close()
+          
+          return coeff_dict
+
+     def chiD_jsu(self,data_array,plot=False):
+          print "FITTING ChiS2 DATA",data_array.shape[0]
+          selectors = self.ppsel(data_array)
+          ssel = selectors.inc_obss_bool
+          wsel = selectors.inc_obsw_bool
+          if plot:
+               gridplot = plt.figure(figsize=(8,8))
+
+          #histogram binning
+          no_so4 = np.count_nonzero(ssel)
+          no_wat = np.count_nonzero(wsel)
+          coeff_dict = {}
+          chiS = np.add(data_array['chiS'],data_array['cchiS'])
+          chiW = np.add(data_array['chiW'],data_array['cchiW'])
+          input_column = np.subtract(chiS,chiW)
+          #clip outliers
+          lcut = np.percentile(input_column,0.01)
+          hcut = np.percentile(input_column,99.99)
+          selr = np.logical_and(input_column > lcut,input_column < hcut)
+          input_column = input_column[selr]
+          col_ssel = ssel[selr]
+          col_wsel = wsel[selr]
+          print "  S/W Sel",np.count_nonzero(col_ssel),np.count_nonzero(col_wsel)
+          print "  Outliers Excluded",np.count_nonzero(np.invert(selr))
+          #compute means and store, normalize
+          col_smean = np.nanmean(input_column[col_ssel],dtype=np.float64)
+          col_wmean = np.nanmean(input_column[col_wsel],dtype=np.float64)
+          colstd = np.nanstd(input_column,dtype=np.float64)
+          print "CONTACT STATS",col_smean,col_wmean,colstd
+          balmean = (col_smean + col_wmean)/2.0
+          coeff_dict["mean_chiD"] = balmean
+          coeff_dict["std_chiD"] = colstd
+          input_column = np.divide(np.subtract(input_column,balmean),colstd)
+
+          #set histogram limits
+          slow = np.percentile(input_column[col_ssel],0.2)
+          wlow = np.percentile(input_column[col_wsel],0.2)
+          shigh = np.percentile(input_column[col_ssel],99.9)
+          whigh = np.percentile(input_column[col_wsel],99.9)
+          sbinw = np.nanstd(input_column[col_ssel],dtype=np.float64)*np.power(42.5/no_so4,0.33)
+          wbinw = np.nanstd(input_column[col_wsel],dtype=np.float64)*np.power(42.5/no_wat,0.33)
+          #divide range by binwidth, clip to reasonable number of points
+          sbins = np.clip(int((shigh-slow)/sbinw),20,100)
+          wbins = np.clip(int((whigh-wlow)/wbinw),20,100)
+          obss_hist,obss_bins = np.histogram(input_column[col_ssel],bins=sbins,density=True,range=(slow,shigh))
+          obsw_hist,obsw_bins = np.histogram(input_column[col_wsel],bins=wbins,density=True,range=(wlow,whigh))
+
+               
+          sfit =  self.fit_jsu(((obss_bins[:-1] + obss_bins[1:]) / 2.0),obss_hist,ivals=[0.7,1.33,-1.5,2.0])
+          wfit =  self.fit_jsu(((obsw_bins[:-1] + obsw_bins[1:]) / 2.0),obsw_hist)#,ivals=[0.2,1.6,2.7,0.77])
+          coeff_dict["sfit_chiD"] = list(sfit)
+          coeff_dict["wfit_chiD"] = list(wfit)
+          
+          if plot: 
+               xdata=np.linspace(np.amin((slow,wlow))-1.0,np.amax((shigh,whigh))+1.0,100)
+               sub = gridplot.add_subplot(111)
+               splot_bins = obss_hist.shape[0]
+               wplot_bins = obsw_hist.shape[0]
+               sub.plot(xdata,self.johnsonsu_pdf(xdata,sfit[0],sfit[1],sfit[2],sfit[3]),'r-')
+               sub.plot(xdata,self.johnsonsu_pdf(xdata,wfit[0],wfit[1],wfit[2],wfit[3]),'b-')
+               sub.hist(input_column[col_ssel], normed=True, bins=splot_bins,color="red",alpha=0.5)
+               sub.hist(input_column[col_wsel], normed=True, bins=wplot_bins,color="blue",alpha=0.5)
+               sub.text(0.2,0.95,"chiD",verticalalignment='bottom',horizontalalignment='right',
+                        transform=sub.transAxes,fontsize=12)
+               #sub.plot(xdata,self.norm_pdf(xdata))
+               sstat = self.johnsonsu_stats(sfit)
+               wstat = self.johnsonsu_stats(wfit)
+               sub.text(0.99,0.95,"%.1f %.2f" % (sstat[0],np.sqrt(sstat[1])),verticalalignment='bottom',
+                        horizontalalignment='right',transform=sub.transAxes,fontsize=10,color='red')
+               sub.text(0.99,0.92,"%.1f %.2f" % (wstat[0],np.sqrt(wstat[1])),verticalalignment='bottom',
+                        horizontalalignment='right',transform=sub.transAxes,fontsize=10,color='blue')
+               sub.text(0.99,0.86,"%.2f %.2f %.2f %.2f" % tuple(sfit),verticalalignment='bottom',
+                        horizontalalignment='right',transform=sub.transAxes,fontsize=10,color='red')
+               sub.text(0.99,0.83,"%.2f %.2f %.2f %.2f" % tuple(wfit),verticalalignment='bottom',
+                        horizontalalignment='right',transform=sub.transAxes,fontsize=10,color='blue')
+          if plot:
+               plt_str = "chiD"
+               plt.savefig("JSU_FITS_"+plt_str+".png")
+               plt.clf()
+               plt.close()
+          
+          return coeff_dict
+  

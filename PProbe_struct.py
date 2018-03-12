@@ -40,7 +40,7 @@ null_log = open(os.devnull,'w')
 
 
 class StructData:
-    def __init__(self,pdb_code,symmetry,orig_pdb_hier,strip_pdb_hier,peak_pdb_hier,map_file):
+    def __init__(self,pdb_code,symmetry,orig_pdb_hier,strip_pdb_hier,peak_pdb_hier,map_file,resolution):
         #instantiate utility class
         self.pput = pputil()
         self.write_atom = self.pput.write_atom
@@ -63,6 +63,8 @@ class StructData:
         self.so4_restraints_01sig = self.make_so4_restraints(0.05)
         self.wat_restraints_1sig = self.make_wat_restraints(1.5)
         self.wat_restraints_01sig = self.make_wat_restraints(0.15)
+        self.resolution = resolution
+        self.res_bin = self.pput.assign_bin(resolution)
         self.solvent_content = self.get_solvent_content()
         #masks are for map operations later
         self.dist_mat = self.make_dist_mask()

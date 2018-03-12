@@ -11,48 +11,25 @@ class Util:
       def __init__(self):
             pass
 
-
-      def original_residue(self,peak_object,cutoff=1.6):
-      #utility function to output the residue identity of contacts close to peak
-      #the peak atom itselv is given chainid ZZ and resid 9999
-      #contacts are sorted dictionary, so can return upon a match
-            for contact in peak_object.contacts:
-                  resname=contact['resname']
-                  dist=contact['distance']
-                  chainid = contact['chain']
-                  resid = contact['resid']
-                  if not (chainid == 'ZZ' and resid == '9999'):
-                        if dist < cutoff:
-                              return resname[0:3]
-            #if peak was nothing (nothing close by, return XXX)
-            return "XXX"
-            
-
-
-      def charge(self,peak_object,cutoff=5.0):
-      #no longer "charge", but rather a probabilistic evaluation of the local environment
-      #all contacts within 5A of a S/P of a sulfate phosphate or a water with 5sig fofc density
-      #were analyzed by atom type (e.g. ALA-O).  The ratio of number of contacts per so4/po4 to
-      #to water, take ln(ratio) to give "logodds" ratios below (all empirical)
-      #summed to give a pseudo-probability, not weighted or normalized to number of contacts
-      #however, gives ~80% F1 score upon logistic regression alone
-            logodds = ast.literal_eval('{"TRP-O":-2.3824 ,"MET-O":-2.3648 ,"TYR-O":-2.3621 ,"PRO-O":-2.2968 ,"GLN-O":-2.1017 ,"PRO-N":-1.9836 ,"PHE-O":-1.9821 ,"LEU-O":-1.9613 ,"ILE-N":-1.9404 ,"VAL-O":-1.9377 ,"MET-SD":-1.9294 ,"ILE-O":-1.9175 ,"ALA-O":-1.8735 ,"TYR-N":-1.8496 ,"VAL-N":-1.8293 ,"ASP-O":-1.7759 ,"ASN-O":-1.7619 ,"PHE-N":-1.7246 ,"SER-O":-1.6582 ,"ARG-O":-1.6056 ,"LEU-N":-1.5904 ,"MET-N":-1.5608 ,"GLY-O":-1.5567 ,"TRP-N":-1.5534 ,"GLU-O":-1.5348 ,"LYS-O":-1.5013 ,"CYS-N":-1.4648 ,"THR-O":-1.4505 ,"CYS-O":-1.4334 ,"ALA-N":-1.3181 ,"HIS-O":-1.2472 ,"ASN-N":-1.2010 ,"ASP-OD1":-1.1974 ,"GLN-N":-1.1047 ,"ASP-N":-1.0909 ,"CYS-SG":-1.0854 ,"GLU-OE1":-1.0400 ,"ASP-OD2":-0.9923 ,"GLU-OE2":-0.9691 ,"ASN-OD1":-0.8993 ,"GLU-N":-0.8775 ,"GLN-OE1":-0.7805 ,"HIS-N":-0.7076 ,"ARG-N":-0.6993 ,"THR-N":-0.6934 ,"SER-N":-0.6783 ,"TRP-NE1":-0.6253 ,"GLY-N":-0.5769 ,"LYS-N":-0.5465 ,"TYR-OH":-0.4579 ,"GLN-NE2":-0.3702 ,"THR-OG1":-0.3541 ,"MG-MG":-0.3360 ,"ASN-ND2":-0.2997 ,"SER-OG":-0.1467 ,"HIS-ND1":0.1188 ,"HIS-NE2":0.2007 ,"ARG-NE":0.4366 ,"ZN-ZN":0.5237 ,"ARG-NH1":0.8532 ,"LYS-NZ":1.0653 ,"ARG-NH2":1.1350}')
-      # no consideration given to altloc or distance scaling
-            running_prob = 0.0
-            for contact in peak_object.contacts:
-                  name = contact['name']
-                  resn = contact['resname']
-                  dist = contact['distance']
-                  cont_id = resn+"-"+name
-                  if logodds.has_key(cont_id) and float(dist) < cutoff:
-                        running_prob = running_prob + logodds[cont_id]
-            return running_prob
-	
-
       def gen_db_id(self,pdb_code,chainid,resid):
       #string concatenation of the pdb_code,chainid, and padded resid/peak id number
       # xxxx_n_yyyyy xxx3=pdb_code, n=chainid, yyyyy = zero padded resid
             return pdb_code+"_"+chainid+"_"+str(resid.zfill(5))
+
+      def gen_unids(self,awl,model=None):
+            at_record = awl.format_atom_record()
+            serial_to_coord = at_record[11:54]
+            unid_atom = hash(serial_to_coord)
+            if model is None:
+                  model = awl.model_id.strip()
+            stc_m = serial_to_coord+str(model)
+            unid_all = hash(stc_m)
+            resgroup = awl.parent().parent()
+            rg_id = resgroup.id_str()
+            resname=awl.resname.strip()
+            r_n_m = rg_id+resname+str(model)
+            unid_rg = hash(r_n_m)
+            return unid_atom,unid_all,unid_rg
 
       def assign_bin(self,resolution):
             #assigns a bin number based on resolution (log based bins)
@@ -91,3 +68,43 @@ class Util:
             pdb_fmt_str ="{:<6s}{:5d} {:^4s}{:1s}{:3s}{:>2s}{:4d}{:1s}   {:8.3f}{:8.3f}{:8.3f}{:6.2f}{:6.2f}          {:>2s}{:2s}\n" 
             record = pdb_fmt_str.format("ATOM",serial,name,alt,resname,chain,resid,ins,x,y,z,occ,temp,element,charge)
             return record
+
+
+
+      def index_by_pdb(self,data_array):
+            #grab a single pdb a large dataset (useful for cluster analysis)
+            #uses the 1st 4 characters of dbid.
+            #returns a dictionary with lists of indices (in case not sorted)
+            pdbid_hash = {}
+            #first pdbid
+            prevpdb = data_array['id'][0][0:4]
+            #pdbid_col = np.zeros(data_array.shape[0],dtype='|S4')
+            for index,peak in enumerate(data_array):
+                  pdbid = peak['id'][0:4]
+                  if pdbid in pdbid_hash:
+                        pdbid_hash[pdbid].append(index)
+                  else:
+                        pdbid_hash[pdbid] = [index,]
+                        if pdbid != prevpdb:
+                              prevpdb = pdbid                        
+            return pdbid_hash
+
+
+
+      def batch_data_equal(self,data_array,max_size):
+            #all data are assigned a random int from 0 - 999
+            #for equal size batches, 1000 % batches must be zero (1000 batches numbered 0-999)
+            #returns an integer array with grouped batches to give max_size target
+            num_target = 1
+            data_size = data_array.shape[0]
+            for num_groups in (1,2,4,5,8,10,20,25,40,50,100,125,200,250,500,1000):
+                  exp_batch_size = data_size/num_groups
+                  if exp_batch_size < max_size:
+                        num_target = num_groups
+                        break #stop when a suitable grouping is found
+                  if num_groups == 1000:
+                        num_target = 1000 #last resort
+            int_mask = data_array['batch'] % num_groups
+            return int_mask
+
+ 

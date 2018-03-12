@@ -39,16 +39,16 @@ class StatFunc:
         #knot x values
         #6 evenly spaced knots between 1 and 4A.
         knots = np.linspace(1.0,4.0,6)
-        xval = np.array(xval).reshape(-1)
+        xval = np.array(xval).reshape(-1).astype(np.float64)
         #cubic spline regression on 1.0,x,and natural cubic spline basis functions
         linear_terms = param[0]*np.ones(xval.shape[0])+param[1]*xval
         num_dterms = knots.shape[0] - 2
-        dterms = np.zeros(xval.shape[0])
+        dterms = np.zeros(xval.shape[0],dtype=np.float64)
         for i in range(num_dterms):
             basis=self.spline_basis(knots[i],knots[-1],xval) - self.spline_basis(knots[-2],knots[-1],xval)
             dterms=dterms+param[i+2]*basis
-
-        return linear_terms + dterms
+        net_spline = linear_terms + dterms
+        return net_spline
 
 
     def johnsonsu_stats(self,param):
@@ -64,12 +64,12 @@ class StatFunc:
 
     def jsu_mean(self,param):
         gamma,delta,xi,lam = param
-        return (xi - lam*np.exp((delta**-2)/2)*np.arcsinh(gamma/delta))
-
+        mean = (xi - lam*np.exp((delta**-2)/2)*np.arcsinh(gamma/delta))
+        return mean
     def jsu_var(self,param):
         gamma,delta,xi,lam = param #xi is not actually needed (shift parameter)
-        return ((lam**2)/2.0)*(np.exp(delta**-2)-1.0)*(np.exp(delta**-2)*np.cosh((2.0*gamma)/delta) + 1.0)
-
+        var = ((lam**2)/2.0)*(np.exp(delta**-2)-1.0)*(np.exp(delta**-2)*np.cosh((2.0*gamma)/delta) + 1.0)
+        return var.astype(np.float32)
 
     def johnsonsu_pdf(self,xval,a,b,loc,scale):
         #borrowed from scipy 
@@ -78,18 +78,19 @@ class StatFunc:
         xshift = (xval-loc)/scale
         prefactor1 = b/((scale*np.sqrt(2*np.pi))*(np.sqrt(1+xshift**2)))
         prob = prefactor1*np.exp(-0.5*(a+b*np.arcsinh(xshift))**2)
-        return prob
+        return prob.astype(np.float32)
 
 
     #pdf for mean zero, var = 1 normal data
     def norm_pdf(self,xdata):
         prefact = 1.0/np.sqrt(2*np.pi)
         ydat = np.exp(-np.multiply(xdata,xdata)/2.0) 
-        return prefact*ydat
+        pdfy = (prefact*ydat).astype(np.float32)
+        return pdfy
 
 
     def llr_to_prob(self,llr_x):#logit
-        return  1.0/(np.exp(-llr_x) + 1.0)  
+        return  (1.0/(np.exp(-llr_x) + 1.0)).astype(np.float32)
 
 
     def fishers_disc(self,resolution):
@@ -107,4 +108,30 @@ class StatFunc:
             sn_data.append(sn)
         return np.array(sn_data)
 
+
+    #CHI SQ 
+    def chisq_pdf(self,k,xval): #conventional chisq
+    #allow non-discrete dof
+        #avoiding scipy 
+        gamma_k2 = np.math.gamma(k/2.0)
+        chisq = 1/(2**(k/2.0)*(gamma_k2))*xval**((k/2.0)-1)*np.exp(-xval/2.0)
+        return chisq     
+
+    def chisq_cdf_k2(self,xval):
+        #simple for 2-dof
+        return 1.0 - np.exp(-xval/2.0)
+
+
+    def chisq_cdf(self,xval,k):
+        #hacked quick integration, quad.spi doesn't do well here, so wing it
+        numbins = 10000
+        chibins = np.linspace(0,200,numbins) #ad hoc
+        binwidth = float(np.amax(chibins))/numbins
+        chidensity = self.chisq_pdf(k,chibins)*binwidth
+        values = []
+        for x in xval:
+            tosumbin = chibins <= x #boolean mask
+            cdfsum = np.nansum(chidensity[tosumbin])
+            values.append(cdfsum)
+        return np.clip(np.array(values),0.0,1.0)
 

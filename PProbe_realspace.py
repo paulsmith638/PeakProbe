@@ -25,9 +25,11 @@ from PProbe_struct import StructData
 from  PProbe_ref import RSRefinements
 from PProbe_util import Util
 from PProbe_cctbx import CctbxHelpers
+from PProbe_contacts import Contacts
 pptbx = CctbxHelpers()
+
 class RealSpace:
-    def __init__(self,peak_object,ref_object,features_dict,ressig=False):
+    def __init__(self,peak_object,ref_object,features_dict,local_cont,ressig=False):
         """
         Class for realspace refinement operations (see PProbe_ref for cctbx refinement routines)
         Various RSR operations are done with results (correlation coefficients, input and output structures, etc.,
@@ -44,6 +46,7 @@ class RealSpace:
 
         self.resid = peak_object.resid
         self.peak_coord = peak_object.coord
+        self.local_strip_contacts = local_cont
         #initial input data cc, not actually used
         self.features['so4_in_hier'] = peak_object.so4_hier
         self.features['wat_in_hier'] = peak_object.wat_hier
@@ -80,7 +83,6 @@ class RealSpace:
         else:
             self.target_2fofc = peak_object.local_map_2fofc
 
-
     def refinement(self,peak,peak_object,ref_object,write_pdb=False,outstr=''):
         spdb_in = peak_object.so4_pdb
         shier_in = peak_object.so4_hier
@@ -90,18 +92,23 @@ class RealSpace:
         wxrs_in = peak_object.wat_xrs
 
         #First, refine sulfate against fofc with loose restraints
-        self.features['so4_fofc_ref_xrs'],self.features['so4_fofc_ref_hier'],dmove = self.prsr(spdb_in,shier_in,sxrs_in,peak_object.local_map_fofc,self.lso4_restr)
+        self.features['so4_fofc_ref_xrs'],self.features['so4_fofc_ref_hier'],dmove = self.prsr(
+            spdb_in,shier_in,sxrs_in,peak_object.local_map_fofc,self.lso4_restr)
 
         #if we moved too far, try again with tighter restraints
         if dmove > 1.8:
-            self.features['so4_fofc_ref_xrs'],self.features['so4_fofc_ref_hier'],dmove = self.prsr(spdb_in,shier_in,sxrs_in,peak_object.local_map_fofc,self.lso4_restr)
+            self.features['so4_fofc_ref_xrs'],self.features['so4_fofc_ref_hier'],dmove = self.prsr(
+                spdb_in,shier_in,sxrs_in,peak_object.local_map_fofc,self.lso4_restr)
         #if still no good, try shaped map that truncates density away from the peak
 
         if dmove > 1.8:
-            self.features['so4_fofc_ref_xrs'],self.features['so4_fofc_ref_hier'],dmove = self.prsr(spdb_in,shier_in,sxrs_in,peak_object.shaped_map_fofc,self.tso4_restr)
+            self.features['so4_fofc_ref_xrs'],self.features['so4_fofc_ref_hier'],dmove = self.prsr(
+                spdb_in,shier_in,sxrs_in,peak_object.shaped_map_fofc,self.tso4_restr)
 
         #all cc's are against original maps
-        self.features['so4_cc_fofc_out']=self.rscc(self.features['so4_fofc_ref_hier'],self.features['so4_fofc_ref_xrs'],"resname SO4",ref_object.fofc_map_data)
+        self.features['so4_cc_fofc_out']=self.rscc(self.features['so4_fofc_ref_hier'],
+                                                   self.features['so4_fofc_ref_xrs'],"resname SO4",
+                                                   ref_object.fofc_map_data)
         self.features['so4_fofc_coord_out'] = self.features['so4_fofc_ref_hier'].atoms()[0].xyz
 
         if write_pdb:
@@ -111,26 +118,34 @@ class RealSpace:
         #Now refine against 2FOFC using similar procedure
         #will use shaped map if strong 2fofc peak closeby, otherwise original map, try loose restraints first
 
-        self.features['so4_2fofc_ref_xrs'],self.features['so4_2fofc_ref_hier'],dmove = self.prsr(spdb_in,shier_in,sxrs_in,self.target_2fofc,self.lso4_restr)
+        self.features['so4_2fofc_ref_xrs'],self.features['so4_2fofc_ref_hier'],dmove = self.prsr(
+            spdb_in,shier_in,sxrs_in,self.target_2fofc,self.lso4_restr)
         if dmove > 1.8:
-            self.features['so4_2fofc_ref_xrs'],self.features['so4_2fofc_ref_hier'],dmove = self.prsr(spdb_in,shier_in,sxrs_in,self.target_2fofc,self.tso4_restr)
+            self.features['so4_2fofc_ref_xrs'],self.features['so4_2fofc_ref_hier'],dmove = self.prsr(
+                spdb_in,shier_in,sxrs_in,self.target_2fofc,self.tso4_restr)
 
-        self.features['so4_cc_2fofc_out']=self.rscc(self.features['so4_2fofc_ref_hier'],self.features['so4_2fofc_ref_xrs'],"resname SO4",ref_object.twofofc_map_data)
+        self.features['so4_cc_2fofc_out']=self.rscc(self.features['so4_2fofc_ref_hier'],self.features['so4_2fofc_ref_xrs'],
+                                                    "resname SO4",ref_object.twofofc_map_data)
         self.features['so4_2fofc_shift'] = self.xform_to_original(shier_in,self.features['so4_2fofc_ref_hier'],self.peak_coord)        
         pptbx.renumber_residue(self.features['so4_2fofc_shift'],self.resid)
+        self.features['so4_2fofc_ref_oricoords'] = list((atom.name,atom.xyz) for atom in self.features['so4_2fofc_shift'].atoms())
         if write_pdb:
             ref_object.write_pdb_file(self.features['so4_2fofc_ref_hier'],peak['db_id']+"_2fofc_"+str(outstr)+"_s_refout.pdb")
             ref_object.write_pdb_file(self.features['so4_2fofc_shift'],peak['db_id']+"_2fofc_"+str(outstr)+"_origS_refout.pdb")            
 
 
         #repeat same procedure for water
-        self.features['wat_fofc_ref_xrs'],self.features['wat_fofc_ref_hier'],dmove = self.prsr(wpdb_in,whier_in,wxrs_in,peak_object.local_map_fofc,self.lwat_restr)
+        self.features['wat_fofc_ref_xrs'],self.features['wat_fofc_ref_hier'],dmove = self.prsr(
+            wpdb_in,whier_in,wxrs_in,peak_object.local_map_fofc,self.lwat_restr)
         if dmove > 2.5:
-            self.features['wat_fofc_ref_xrs'],self.features['wat_fofc_ref_hier'],dmove = self.prsr(wpdb_in,whier_in,wxrs_in,peak_object.local_map_fofc,self.twat_restr)
+            self.features['wat_fofc_ref_xrs'],self.features['wat_fofc_ref_hier'],dmove = self.prsr(
+                wpdb_in,whier_in,wxrs_in,peak_object.local_map_fofc,self.twat_restr)
         if dmove > 2.5:
-            self.features['wat_fofc_ref_xrs'],self.features['wat_fofc_ref_hier'],dmove = self.prsr(wpdb_in,whier_in,wxrs_in,peak_object.shaped_map_fofc,self.twat_restr)
+            self.features['wat_fofc_ref_xrs'],self.features['wat_fofc_ref_hier'],dmove = self.prsr(
+                wpdb_in,whier_in,wxrs_in,peak_object.shaped_map_fofc,self.twat_restr)
 
-        self.features['wat_cc_fofc_out']=self.rscc(self.features['wat_fofc_ref_hier'],self.features['wat_fofc_ref_xrs'],"resname HOH",ref_object.fofc_map_data)
+        self.features['wat_cc_fofc_out']=self.rscc(self.features['wat_fofc_ref_hier'],self.features['wat_fofc_ref_xrs'],
+                                                   "resname HOH",ref_object.fofc_map_data)
         self.features['wat_fofc_coord_out'] = self.features['wat_fofc_ref_hier'].atoms()[0].xyz
 
         if write_pdb:
@@ -138,15 +153,23 @@ class RealSpace:
             ref_object.write_pdb_file(self.features['wat_fofc_ref_hier'],peak['db_id']+"_fofc_"+str(outstr)+"_w_refout.pdb")
 
         #2FOFC, start from 2fofc refined position
-        self.features['wat_2fofc_ref_xrs'],self.features['wat_2fofc_ref_hier'],dmove = self.prsr(wpdb_in,self.features['wat_fofc_ref_hier'],self.features['wat_fofc_ref_xrs'],
-                                                                                                 self.target_2fofc,self.lwat_restr)
+        self.features['wat_2fofc_ref_xrs'],self.features['wat_2fofc_ref_hier'],dmove = self.prsr(
+            wpdb_in,self.features['wat_fofc_ref_hier'],self.features['wat_fofc_ref_xrs'],self.target_2fofc,self.lwat_restr)
         if dmove > 1.5:
-            self.features['wat_2fofc_ref_xrs'],self.features['wat_2fofc_ref_hier'],dmove = self.prsr(wpdb_in,self.features['wat_fofc_ref_hier'],self.features['wat_fofc_ref_xrs'],
-                                                                                                     self.target_2fofc,self.twat_restr)
+            self.features['wat_2fofc_ref_xrs'],self.features['wat_2fofc_ref_hier'],dmove = self.prsr(
+                wpdb_in,self.features['wat_fofc_ref_hier'],self.features['wat_fofc_ref_xrs'],self.target_2fofc,self.twat_restr)
 
-        self.features['wat_cc_2fofc_out']=self.rscc(self.features['wat_2fofc_ref_hier'],self.features['wat_2fofc_ref_xrs'],"resname HOH",ref_object.twofofc_map_data)
+        self.features['wat_cc_2fofc_out']=self.rscc(self.features['wat_2fofc_ref_hier'],self.features['wat_2fofc_ref_xrs'],
+                                                    "resname HOH",ref_object.twofofc_map_data)
         self.features['wat_2fofc_shift'] = self.xform_to_original(whier_in,self.features['wat_2fofc_ref_hier'],self.peak_coord)
         pptbx.renumber_residue(self.features['wat_2fofc_shift'],self.resid)
+        self.features['wat_2fofc_ref_oricoords'] = self.features['wat_2fofc_shift'].atoms()[0].xyz
+
+        #debugging
+        #w_shift_check = self.xform_to_original(whier_in,whier_in,self.peak_coord)
+        #ref_object.write_pdb_file(w_shift_check,peak['db_id']+"_check.pdb")
+        #ref_object.write_pdb_file(whier_in,peak['db_id']+"_whierin.pdb")
+        ######
 
         if write_pdb:
             ref_object.write_pdb_file(self.features['wat_2fofc_ref_hier'],peak['db_id']+"_2fofc_"+str(outstr)+"_w_refout.pdb")
@@ -154,37 +177,52 @@ class RealSpace:
 
         #SO4 REFINEMENT AGAINST INVERTED DENSITY
         #first calculate CC for refined position against the inverted maps
-        self.features['so4_cc_fofc_inv_in']=self.rscc(self.features['so4_fofc_ref_hier'],self.features['so4_fofc_ref_xrs'],"resname SO4",ref_object.fofc_inv_map_data)
-        self.features['so4_cc_2fofc_inv_in']=self.rscc(self.features['so4_2fofc_ref_hier'],self.features['so4_2fofc_ref_xrs'],"resname SO4",ref_object.twofofc_inv_map_data)
+        self.features['so4_cc_fofc_inv_in']=self.rscc(self.features['so4_fofc_ref_hier'],self.features['so4_fofc_ref_xrs'],
+                                                      "resname SO4",ref_object.fofc_inv_map_data)
+        self.features['so4_cc_2fofc_inv_in']=self.rscc(self.features['so4_2fofc_ref_hier'],self.features['so4_2fofc_ref_xrs'],
+                                                       "resname SO4",ref_object.twofofc_inv_map_data)
 
         #then refine against inverted map, tight restraints
-        self.features['so4_ifofc_ref_xrs'],self.features['so4_ifofc_ref_hier'],dmove = self.prsr(spdb_in,self.features['so4_fofc_ref_hier'],self.features['so4_fofc_ref_xrs'],
+        self.features['so4_ifofc_ref_xrs'],self.features['so4_ifofc_ref_hier'],dmove = self.prsr(spdb_in,self.features['so4_fofc_ref_hier'],
+                                                                                                 self.features['so4_fofc_ref_xrs'],
                                                                                                  ref_object.fofc_inv_map_data,self.tso4_restr)
-        self.features['so4_cc_fofc_inv_out']=self.rscc(self.features['so4_ifofc_ref_hier'],self.features['so4_ifofc_ref_xrs'],"resname SO4",ref_object.fofc_inv_map_data)
+        self.features['so4_cc_fofc_inv_out']=self.rscc(self.features['so4_ifofc_ref_hier'],self.features['so4_ifofc_ref_xrs'],
+                                                       "resname SO4",ref_object.fofc_inv_map_data)
 
         #calculate CC from coordinates refined against inv map, but to original 2fofc map
-        self.features['so4_cc_fofc_inv_rev']=self.rscc(self.features['so4_ifofc_ref_hier'],self.features['so4_ifofc_ref_xrs'],"resname SO4",ref_object.fofc_map_data)
+        self.features['so4_cc_fofc_inv_rev']=self.rscc(self.features['so4_ifofc_ref_hier'],self.features['so4_ifofc_ref_xrs'],
+                                                       "resname SO4",ref_object.fofc_map_data)
 
         #repeat for 2fofc
-        self.features['so4_i2fofc_ref_xrs'],self.features['so4_i2fofc_ref_hier'],dmove = self.prsr(spdb_in,self.features['so4_2fofc_ref_hier'],self.features['so4_2fofc_ref_xrs'],
-                                                                                                   ref_object.twofofc_inv_map_data,self.tso4_restr)
-        self.features['so4_cc_2fofc_inv_out']=self.rscc(self.features['so4_i2fofc_ref_hier'],self.features['so4_i2fofc_ref_xrs'],"resname SO4",ref_object.twofofc_inv_map_data)
-        self.features['so4_cc_2fofc_inv_rev']=self.rscc(self.features['so4_i2fofc_ref_hier'],self.features['so4_i2fofc_ref_xrs'],"resname SO4",ref_object.twofofc_map_data)
+        self.features['so4_i2fofc_ref_xrs'],self.features['so4_i2fofc_ref_hier'],dmove = self.prsr(
+            spdb_in,self.features['so4_2fofc_ref_hier'],self.features['so4_2fofc_ref_xrs'],ref_object.twofofc_inv_map_data,self.tso4_restr)
+
+        self.features['so4_cc_2fofc_inv_out']=self.rscc(self.features['so4_i2fofc_ref_hier'],self.features['so4_i2fofc_ref_xrs'],
+                                                        "resname SO4",ref_object.twofofc_inv_map_data)
+        self.features['so4_cc_2fofc_inv_rev']=self.rscc(self.features['so4_i2fofc_ref_hier'],self.features['so4_i2fofc_ref_xrs'],
+                                                        "resname SO4",ref_object.twofofc_map_data)
 
         #WAT CHECK AGAINST INVERTED DENSITY
         #calculate inv CC's for water, no refinement as only one atom which should be correctly positioned
-        self.features['wat_cc_fofc_inv']=self.rscc(self.features['wat_fofc_ref_hier'],self.features['wat_fofc_ref_xrs'],"resname HOH",ref_object.fofc_inv_map_data)
-        self.features['wat_cc_2fofc_inv']=self.rscc(self.features['wat_2fofc_ref_hier'],self.features['wat_2fofc_ref_xrs'],"resname HOH",ref_object.twofofc_inv_map_data)
+        self.features['wat_cc_fofc_inv']=self.rscc(self.features['wat_fofc_ref_hier'],self.features['wat_fofc_ref_xrs'],
+                                                   "resname HOH",ref_object.fofc_inv_map_data)
+        self.features['wat_cc_2fofc_inv']=self.rscc(self.features['wat_2fofc_ref_hier'],self.features['wat_2fofc_ref_xrs'],
+                                                    "resname HOH",ref_object.twofofc_inv_map_data)
  
-
     def ref_contacts(self):
+        #we need a contact list for refined W/S in original coordinates
+        #re-doing fast_pair search can be very slow and inefficient
+        #workaround -- regenerate local environment from contact list
+        #then find contacts accordingly
         ppctx = CctbxHelpers()
+        ppcont = Contacts(phenix_python=True)
+        local_hier = ppcont.hier_from_contacts(self.local_strip_contacts,self.resid,self.struct_data.orig_symmetry)
         w_coord = self.features['wat_2fofc_shift'].atoms()[0].xyz
-        self.features['w_contacts']=ppctx.contacts_to_coord(w_coord,self.struct_data.strip_pdb_hier,self.struct_data.orig_symmetry)
+        self.features['w_contacts']=ppctx.contacts_to_coord(w_coord,local_hier,self.struct_data.orig_symmetry)
         s_contacts=[]
         s_coords  = (atom.xyz for atom in self.features['so4_2fofc_shift'].atoms())
         for coord in s_coords:
-            c_cont = ppctx.contacts_to_coord(coord,self.struct_data.strip_pdb_hier,self.struct_data.orig_symmetry) 
+            c_cont = ppctx.contacts_to_coord(coord,local_hier,self.struct_data.orig_symmetry) 
             for c_dict in c_cont:
                 s_contacts.append(c_dict)
         s_contacts.sort(key = lambda x: x['distance'])

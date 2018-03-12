@@ -38,7 +38,7 @@ class PeakObj:
          2)makes versions of these maps (shaped, round, etc.)
 
     """
-    def __init__(self,pdb_code,symmetry,orig_pdb_hier,strip_pdb_hier,peak_pdb_hier,struct_data,chainid,resid,coord,bound):
+    def __init__(self,pdb_code,unid,symmetry,orig_pdb_hier,strip_pdb_hier,peak_pdb_hier,struct_data,chainid,resid,coord,bound):
         #instantiate utility classes
         self.pput = Util()
         self.ppctx = CctbxHelpers()
@@ -59,7 +59,7 @@ class PeakObj:
         self.coord = coord #tuple of floats
         self.bound = bound
         self.grid_last = int(self.bound*4+1)
-        
+        self.unid = unid
 
         #copy pdb,hier,xrs in standard settings
         self.so4_pdb = copy.deepcopy(self.struct_data.std_so4_pdb)
@@ -83,21 +83,6 @@ class PeakObj:
         #set peak heights of initial peak
         self.peak_fofc = self.density_at_point(self.struct_data.fofc_map_data,self.orig_xrs,self.coord)
         self.peak_2fofc = self.density_at_point(self.struct_data.twofofc_map_data,self.orig_xrs,self.coord)
-
-        #attach dictionary of all local contacts with symmetry
-        self.local_contacts()
-
-    def local_contacts(self):
-        #default is 6A
-        lcontact = self.ppctx.contacts_to_coord(self.coord,self.orig_pdb_hier,self.orig_symmetry)
-        strip_contact = self.ppctx.contacts_to_coord(self.coord,self.strip_pdb_hier,self.orig_symmetry)
-        peak_contact = self.ppctx.contacts_to_coord(self.coord,self.peak_pdb_hier,self.orig_symmetry)
-        #remove self-contact from peaks
-        if peak_contact[0]['distance'] < 0.01:
-            del peak_contact[0]
-        self.contacts =  lcontact
-        self.strip_contacts = strip_contact
-        self.peak_contacts = peak_contact
 
     def density_at_point(self,map_data,xrs,point):
         site_frac = xrs.unit_cell().fractionalize(site_cart=point)

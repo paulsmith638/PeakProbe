@@ -51,11 +51,12 @@ class PCA:
             databin = input_data[ressel]
             res_block=res[ressel]
             print "    CALC EIGv for BIN %2s RES %4.2f - %4.2f [%4.2f] %6s" % \
-                (resbin,np.amin(res_block),np.amax(res_block),np.nanmean(res_block),res_block.shape[0])
+                (resbin,np.amin(res_block),np.amax(res_block),
+                 np.nanmean(res_block,dtype=np.float64),res_block.shape[0])
             bin_modal = self.modal_matrix(databin,verbose=True)
             eig_data.append(bin_modal)
             #get resolutions for each databin
-            resmean = np.nanmean(res_block)
+            resmean = np.nanmean(res_block,dtype=np.float64)
             binres.append(resmean)
 
         binres_vals = np.array(binres)#1d array of resolutions for fitting
