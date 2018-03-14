@@ -224,8 +224,8 @@ class Contacts:
       def _dlookup(self,p1,p2,pdb_data,all_id_hash):
             #recover peak distances
             #note, won't always be there, improvise
-            peak1=pdb_data[all_id_hash[p1]]
-            peak2=pdb_data[all_id_hash[p2]]
+            peak1=pdb_data[all_id_hash.get(p1,0)]
+            peak2=pdb_data[all_id_hash.get(p1,0)]
             if peak1['id'] == peak2['id']:
                   return 0.0
             for i in np.arange(1,4,1):

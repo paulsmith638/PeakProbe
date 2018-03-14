@@ -39,6 +39,7 @@ class ClassifierFunctions:
           self.contact_coeffs = None
           self.jsu_coeffs = None
           self.scale_composite = None
+          self.chiD_coeffs = None
           if not train:
                self.setup_dict(input_dict=input_dict,input_dfile=input_dfile)
 
@@ -65,6 +66,8 @@ class ClassifierFunctions:
                self.resscale_pca_coeffs = self.master_dict['pca']
           if 'composite' in cur_keys:
                self.scale_composite = self.master_dict['composite']
+          if 'chiD' in cur_keys:
+               self.chiD_coeffs = self.master_dict['chiD']
 
 
      def get_stats(self,array):
@@ -458,38 +461,18 @@ class ClassifierFunctions:
                result_class[select] = index + 1 #number from one
           results_array['rc'] = result_class
 
-     def new_binscore(self,data_array):
-          column_list = ['score','cscore','llgS','llgW','cllgS','cllgW','chiS','chiW','cchiS','cchiW']
-          score_bins = np.zeros((data_array.shape[0],len(column_list)),dtype=np.int16)
-          for cind,column in enumerate(column_list):
-               datain = data_array[column]
-               low_cut = np.percentile(datain,.5)
-               high_cut = np.percentile(datain,99.5)
-               bins = np.linspace(low_cut,high_cut,8)
-               #bins[0] = -np.inf
-               #bins[-1] = np.inf
-               score_bins[:,cind] = np.digitize(datain,bins)
-               print "BINS",column,low_cut,high_cut,["%3.1f" % x for x in bins],[np.count_nonzero(score_bins[:,cind] == x) for x in range(bins.shape[0]+1)] 
-          s_score = np.nansum(score_bins[:,[2,4]],axis=1) - np.nansum(score_bins[:,[6,8]],axis=1) 
-          w_score = np.nansum(score_bins[:,[2,5]],axis=1) - np.nansum(score_bins[:,[7,9]],axis=1) 
-          data_array['edc'] = 10 - score_bins[:,2] 
-          data_array['cc'] = w_score
-          data_array['rc'] = s_score - w_score
-          for pind,peak in enumerate(data_array):
-               print "BINSCORE",peak['id'],peak['edc'],peak['cc'],peak['rc']," ".join(["%d" % x for x in score_bins[pind]])
-          #np.save('out_ns.npy',data_array)
 
-     def score_flags(self,data_array,full_out=False,verbose=False):
+     def score_flags(self,data_array,full_out=False):
           #assigns a "result_class"
           #cutoffs for good values (g=good,s/w,density/contact,llg/chi)
-          gses_cut = -3.0
+          gses_cut = 0.0
           gscs_cut = -3.0
-          gsec_cut = 50.0
+          gsec_cut = 30.0
           gscc_cut = 3.5
           gwes_cut = 0.0
           gwcs_cut = -2.5
-          gwec_cut = 30.0
-          gwcc_cut = 3.5
+          gwec_cut = 28.0
+          gwcc_cut = 5.0
           
           #cutoffs for best by chiS, chiW, cchiS, cchiW
           #best_chi_w = [(10.0,45.0),(2.0,20.0),(3.0,10.0),(0.0,1.8)]
@@ -506,7 +489,7 @@ class ClassifierFunctions:
           goodw_ec = data_array['chiW'] < gwec_cut
           goodw_cc = data_array['cchiW'] < gwec_cut
 
-          preds = data_array['prob'] > 0.8
+          preds = data_array['prob'] > 0.8 #prob not water
           predw = np.invert(preds)
 
           #logical assignments 
@@ -519,7 +502,7 @@ class ClassifierFunctions:
           logical_ass[:,4] = np.logical_or(preds.astype(np.int16)*goods_cc,predw.astype(np.int16)*goodw_cc)
 
 
-          if verbose:
+          if self.verbose:
                ppsel = Selectors(data_array)
                labs = ppsel.inc_obss_bool
                labw = ppsel.inc_obsw_bool
@@ -552,7 +535,7 @@ class ClassifierFunctions:
                                              breakdown = break_total(intersection)
 
                                              print "COUNTS %3d %1d %1d %1d %1d %1d %1d || %7d ||  %s" % (lc,a,b,c,d,e,flagsum, count,
-                                                                                               " ".join(('{:^7s}'.format(str(x)) for x in break_total(intersection))))
+                                                       " ".join(('{:^7s}'.format(str(x)) for x in break_total(intersection))))
 
                                         lc = lc+1
           if full_out:
@@ -577,7 +560,7 @@ class ClassifierFunctions:
           for index,lclass in enumerate((pc01,pc02,pc03,pc04,pc05,pc06,pc07,pc08,pc09)):
                select = lclass
                result_class[select] = index + 1 #number from one
-          if verbose:
+          if self.verbose:
                total=0
                for i in range(np.amax(result_class)+1):
                     selector = result_class == i
@@ -719,11 +702,11 @@ class ClassifierFunctions:
           #cutoffs for "good" values for llg and chisq (empirical)
           #cutoffs for score/chi S/W
           gss_cut = -3.0 #good
-          xss_cut = 5.0  #great
-          gsc_cut = 65
-          gws_cut = -3.0
-          xws_cut = 5.0
-          gwc_cut = 55
+          xss_cut = 3.0  #great
+          gsc_cut = 35
+          gws_cut = -1.0
+          xws_cut = 1.0
+          gwc_cut = 35
     
           preds = results_array['score'] > 0.0
           goods_ss = results_array['llgS'] > gss_cut
@@ -759,8 +742,6 @@ class ClassifierFunctions:
           edc2 =(logical_ass == (1,1,1,0)).all(axis=1) #preds,goods,goodc --> good S
           edc3 =(logical_ass == (1,0,1,0)).all(axis=1) #preds,bads,goodc --> weak S
           edc4 =(logical_ass == (1,1,0,0)).all(axis=1) #preds,goods,badc --> bad S
-          #edc4 =(logical_ass == (1,0,0)).all(axis=1) #preds,bads,badc --> really bad S
-          #edc5 =(logical_ass == (0,0,0)).all(axis=1) #predw,bads,badc --> really bad W
           edc5 =(logical_ass == (0,1,0,0)).all(axis=1) #predw,goods,badc --> bad W
           edc6 =(logical_ass == (0,0,1,0)).all(axis=1) #predw,bads,goodc --> weak W
           edc7 =(logical_ass == (0,1,1,0)).all(axis=1) #predw,goods,goodc --> good W
@@ -846,46 +827,6 @@ class ClassifierFunctions:
 
           return flag_class
 
-     def comb_score(self,data_array):
-          ppsel = Selectors(data_array)
-          preds = data_array['prob'] > 0.5
-          predw = np.invert(preds)
-          labs = ppsel.inc_obss_bool
-          labw = ppsel.inc_obsw_bool
-          nolabel = np.invert(np.logical_or(labs,labw))
-          tpsel = np.logical_and(labs,preds)
-          tnsel = np.logical_and(labw,predw)
-          fpsel = np.logical_and(labw,preds)
-          fnsel = np.logical_and(labs,predw)
-          owsel = np.logical_and(nolabel,predw)
-          ossel = np.logical_and(nolabel,preds)
-          logical_ass = np.zeros((data_array.shape[0],4),dtype=np.int16)
-          
-          logical_ass[:,0] = data_array['rc']
-          logical_ass[:,1] = data_array['edc']
-          logical_ass[:,2] = data_array['cc']
-          logical_ass[:,3] = data_array['fc']
-          break_total = lambda sel: np.array([np.count_nonzero(np.logical_and(tpsel,sel)),
-                                              np.count_nonzero(np.logical_and(tnsel,sel)),
-                                              np.count_nonzero(np.logical_and(fpsel,sel)),
-                                              np.count_nonzero(np.logical_and(fnsel,sel)),
-                                              np.count_nonzero(np.logical_and(ossel,sel)),
-                                              np.count_nonzero(np.logical_and(owsel,sel))],dtype=np.int64)
-
-          lc = 1
-          print "GROUPS %3s %10s || %7s ||  %s" % ("GRP"," R E C F ","total","  S-S     W-W     W-S     S-W     0-S     0-W")
-          for a in range(10):
-               for b in range(10):
-                    for c in range(10):
-                         for d in range(10):
-                              intersection = (logical_ass == (a,b,c,d)).all(axis=1)
-                              count = np.count_nonzero(intersection)
-                              if count > 10:
-                                   breakdown = break_total(intersection)
-                                   print "COUNTS %5d %1d %1d %1d %1d || %7d ||  %s" % (lc,a,b,c,d,count,
-                                                                                       " ".join(('{:^7s}'.format(str(x)) for x in breakdown)))
-                              lc = lc+1
-
 
      def peak_cc(self,data_array):
           #function to give a class for local contact environment
@@ -898,7 +839,7 @@ class ClassifierFunctions:
           gsc_cut = 3.0
           gws_cut = -4.0
           xws_cut = -2.0
-          gwc_cut = 8.0
+          gwc_cut = 5.0
     
           preds = data_array['prob'] > 0.8
 
@@ -1153,8 +1094,7 @@ class ClassifierFunctions:
                                         pdict['anchor'] = anc_cont
 
                if update:
-                    n_anc = all_peak_db[pdict['anchor']['unal']]
-                    #print "ANCHUP",pdict['db_id'],pdict['status'],ori_c1,pdict['c1'],n_anc['resat']
+                    #n_anc = all_peak_db[pdict['anchor']['unal']]
                     anc_updates = anc_updates + 1
           return anc_updates
 
@@ -1176,15 +1116,14 @@ class ClassifierFunctions:
                pick = pdict['pick']
                ambig = pdict['ambig']
                pnw = pdata['prob']
-               pnw_match = (pnw > 0.5 and pick > 1) or (pnw < 0.5 and pick == 1)
+               pnw_match = (pnw > 0.8 and pick > 1) or (pnw < 0.2 and pick == 1)
                good_w = edc > 6 and cc > 6 and rc > 7 and pick == 1
                good_s = edc < 3 and cc < 3 and rc in [1,2] and pick == 2
-               good_o = pdata['chiW'] > 25.0 and pick == 3
-               good_m = pdata['chiS'] < 25.0 and pick == 4
+               good_o = pdata['chiW'] > 20.0 and pick == 3
+               good_m = pdata['chiS'] < 40.0 and pick == 4
                any_good = good_w or good_s or good_o or good_m
                new_status = 1000*pick+400*pnw_match+200*(not ambig)+100*any_good
                if pdict['status'] != new_status:
-                    #print "STATUP_1",pdict['db_id'],pdict['status'],new_status
                     pdict['status'] = new_status
 
      def class_mismatches(self,all_peak_db):
@@ -1245,4 +1184,12 @@ class ClassifierFunctions:
                     pdict['pick_name'] = "MOD"
                     pdict['ambig'] = False
 
-
+     def chi_prob(self,data_array):
+          if self.chiD_coeffs is None:
+               sys.exit("NO chiD COEFFICIENTS, ERROR!")
+          chiS = np.add(data_array['chiS'],data_array['cchiS'])
+          chiW = np.add(data_array['chiW'],data_array['cchiW'])
+          chiD = np.subtract(chiS,chiW)
+          coef = self.chiD_coeffs
+          prob = 1.0/(1.0+np.exp(-(coef[0]+chiD*coef[1])))
+          data_array['prob'] = prob

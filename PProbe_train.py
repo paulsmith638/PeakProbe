@@ -99,47 +99,35 @@ class TrainingFunctions:
                                     bounds=constraints,approx_grad=True,disp=False)
           return L[0] #just return fitted parameters
   
-     def logit_target(self,par_wt,data_array,labels):
-          #labels are 1/0 T/F or bool
-          param = par_wt[0:-1:1]
-          weight = par_wt[-1]
-          invl = np.invert(labels)
-          pred = self.logit_prob(data_array,param)
-          preds = pred > 0.5
-          cnz = lambda sel: np.count_nonzero(sel)
-          ntpsel = np.logical_and(labels,preds)
-          ntnsel = np.logical_and(np.invert(labels),np.invert(preds))
-          nfpsel = np.logical_and(np.invert(labels),preds)
-          nfnsel = np.logical_and(labels,np.invert(preds))
-          ppv = float(cnz(ntpsel))/(cnz(ntpsel)+cnz(nfpsel))
-          rec = float(cnz(ntpsel))/(cnz(ntpsel)+cnz(nfnsel))
-          f1 = 2.0*ppv*rec/(ppv+rec)
-          normP = np.dot(param,param.T)
-          normW = weight**2
-          norm = normP + normW
-          regT = np.nansum((self.logit_prob(param,data_array[labels]) - labels[labels]*weight)**2)
-          regF = np.nansum((self.logit_prob(param,data_array[invl]))**2)
-          print "TARGET",normP,normW,regT,regF,par_wt
-          tot = norm + regT + regF
-          print ppv,rec,f1
-          return tot/(f1**2)
+     #hack at using usual minimizer to get coefficients for logistic regression
+     #expects single column of data with intercept, and a single column of labels
+     #labels are 1/0 T/F or bool
+     def logit_target(self,param,data_array,labels):
+          exp_term = np.dot(data_array,param)
+          pos_weight = 0.85
+          error = -(np.nansum(pos_weight*labels*(exp_term - np.log((1.0 + np.exp(exp_term)))) +
+                              (1.0-pos_weight)*(1-labels)*(-np.log((1.0 + np.exp(exp_term))))))
+          norm = np.dot(param,param.T)#L2 norm
+          return error+norm
+
+     def logit_fprime(self,param,data_array,labels):
+          return np.dot(data_array.T,(self.logit_prob(param,data_array)-labels))
+
 
      def fit_logit(self,data_array,labels):
-          initial = np.ones(data_array.shape[1]+1)
-          L = op.fmin_bfgs(self.logit_target,initial,args=(data_array,labels),disp=False)
-          print L
+          initial = np.array((-1.2, -0.16))
+          L = op.fmin_bfgs(self.logit_target,initial,fprime=self.logit_fprime,args=(data_array,labels),disp=False)
           return L
 
-     def logit_prob(self,param,lrdata):
-          lrp = 1.0/(1.0 + np.exp(-(np.dot(param,lrdata.T))))
+     def logit_prob(self,param,datain):
+          if datain.ndim == 2:
+               xdat = datain[:,1]
+          else:
+               xdat = datain
+          lrp = 1.0/(1.0+np.exp(-(param[0]+param[1]*xdat)))
           return lrp
 
-     def setup_logit(self,data_array,col_list):
-          lrdata=np.ones((data_array.shape[0],len(col_list)+1),dtype=np.float64)
-          for index,column in enumerate(col_list):
-               lrdata[:,index+1] = data_array[column]
-          return lrdata
-
+     
 
      """
      SPLINE fitting, currently fixed at 4 internal knots
@@ -863,86 +851,34 @@ class TrainingFunctions:
           
           return coeff_dict
 
-     def chiD_jsu(self,data_array,plot=False):
+     def chiD_fit(self,data_array,plot=False):
           print "FITTING ChiS2 DATA",data_array.shape[0]
           selectors = self.ppsel(data_array)
-          ssel = selectors.inc_obss_bool
-          wsel = selectors.inc_obsw_bool
+          wat_sel = selectors.inc_obsw_bool
+          not_wat_sel = np.invert(wat_sel)
           if plot:
                gridplot = plt.figure(figsize=(8,8))
-
           #histogram binning
-          no_so4 = np.count_nonzero(ssel)
-          no_wat = np.count_nonzero(wsel)
+          no_wat = np.count_nonzero(wat_sel)
+          no_nw = np.count_nonzero(not_wat_sel)
           coeff_dict = {}
           chiS = np.add(data_array['chiS'],data_array['cchiS'])
           chiW = np.add(data_array['chiW'],data_array['cchiW'])
-          input_column = np.subtract(chiS,chiW)
+          chiD = np.subtract(chiS,chiW)
           #clip outliers
-          lcut = np.percentile(input_column,0.01)
-          hcut = np.percentile(input_column,99.99)
-          selr = np.logical_and(input_column > lcut,input_column < hcut)
-          input_column = input_column[selr]
-          col_ssel = ssel[selr]
-          col_wsel = wsel[selr]
-          print "  S/W Sel",np.count_nonzero(col_ssel),np.count_nonzero(col_wsel)
+          lcut = np.percentile(chiD,0.01)
+          hcut = np.percentile(chiD,99.99)
+          selr = np.logical_and(chiD > lcut,chiD < hcut)
+          chiD = chiD[selr]
+          wat_sel = wat_sel[selr]
+          not_wat_sel = not_wat_sel[selr]
+          print "  W/NW Sel",np.count_nonzero(wat_sel),np.count_nonzero(not_wat_sel)
           print "  Outliers Excluded",np.count_nonzero(np.invert(selr))
-          #compute means and store, normalize
-          col_smean = np.nanmean(input_column[col_ssel],dtype=np.float64)
-          col_wmean = np.nanmean(input_column[col_wsel],dtype=np.float64)
-          colstd = np.nanstd(input_column,dtype=np.float64)
-          print "CONTACT STATS",col_smean,col_wmean,colstd
-          balmean = (col_smean + col_wmean)/2.0
-          coeff_dict["mean_chiD"] = balmean
-          coeff_dict["std_chiD"] = colstd
-          input_column = np.divide(np.subtract(input_column,balmean),colstd)
+          lr_data = np.ones((chiD.shape[0],2))
+          lr_data[:,1] = chiD
+          lr_labels = np.zeros(chiD.shape[0],dtype=np.int16)
+          lr_labels[not_wat_sel] = 1
+          lr_coeff = self.fit_logit(lr_data,lr_labels)
+          return list(lr_coeff)
 
-          #set histogram limits
-          slow = np.percentile(input_column[col_ssel],0.2)
-          wlow = np.percentile(input_column[col_wsel],0.2)
-          shigh = np.percentile(input_column[col_ssel],99.9)
-          whigh = np.percentile(input_column[col_wsel],99.9)
-          sbinw = np.nanstd(input_column[col_ssel],dtype=np.float64)*np.power(42.5/no_so4,0.33)
-          wbinw = np.nanstd(input_column[col_wsel],dtype=np.float64)*np.power(42.5/no_wat,0.33)
-          #divide range by binwidth, clip to reasonable number of points
-          sbins = np.clip(int((shigh-slow)/sbinw),20,100)
-          wbins = np.clip(int((whigh-wlow)/wbinw),20,100)
-          obss_hist,obss_bins = np.histogram(input_column[col_ssel],bins=sbins,density=True,range=(slow,shigh))
-          obsw_hist,obsw_bins = np.histogram(input_column[col_wsel],bins=wbins,density=True,range=(wlow,whigh))
-
-               
-          sfit =  self.fit_jsu(((obss_bins[:-1] + obss_bins[1:]) / 2.0),obss_hist,ivals=[0.7,1.33,-1.5,2.0])
-          wfit =  self.fit_jsu(((obsw_bins[:-1] + obsw_bins[1:]) / 2.0),obsw_hist)#,ivals=[0.2,1.6,2.7,0.77])
-          coeff_dict["sfit_chiD"] = list(sfit)
-          coeff_dict["wfit_chiD"] = list(wfit)
-          
-          if plot: 
-               xdata=np.linspace(np.amin((slow,wlow))-1.0,np.amax((shigh,whigh))+1.0,100)
-               sub = gridplot.add_subplot(111)
-               splot_bins = obss_hist.shape[0]
-               wplot_bins = obsw_hist.shape[0]
-               sub.plot(xdata,self.johnsonsu_pdf(xdata,sfit[0],sfit[1],sfit[2],sfit[3]),'r-')
-               sub.plot(xdata,self.johnsonsu_pdf(xdata,wfit[0],wfit[1],wfit[2],wfit[3]),'b-')
-               sub.hist(input_column[col_ssel], normed=True, bins=splot_bins,color="red",alpha=0.5)
-               sub.hist(input_column[col_wsel], normed=True, bins=wplot_bins,color="blue",alpha=0.5)
-               sub.text(0.2,0.95,"chiD",verticalalignment='bottom',horizontalalignment='right',
-                        transform=sub.transAxes,fontsize=12)
-               #sub.plot(xdata,self.norm_pdf(xdata))
-               sstat = self.johnsonsu_stats(sfit)
-               wstat = self.johnsonsu_stats(wfit)
-               sub.text(0.99,0.95,"%.1f %.2f" % (sstat[0],np.sqrt(sstat[1])),verticalalignment='bottom',
-                        horizontalalignment='right',transform=sub.transAxes,fontsize=10,color='red')
-               sub.text(0.99,0.92,"%.1f %.2f" % (wstat[0],np.sqrt(wstat[1])),verticalalignment='bottom',
-                        horizontalalignment='right',transform=sub.transAxes,fontsize=10,color='blue')
-               sub.text(0.99,0.86,"%.2f %.2f %.2f %.2f" % tuple(sfit),verticalalignment='bottom',
-                        horizontalalignment='right',transform=sub.transAxes,fontsize=10,color='red')
-               sub.text(0.99,0.83,"%.2f %.2f %.2f %.2f" % tuple(wfit),verticalalignment='bottom',
-                        horizontalalignment='right',transform=sub.transAxes,fontsize=10,color='blue')
-          if plot:
-               plt_str = "chiD"
-               plt.savefig("JSU_FITS_"+plt_str+".png")
-               plt.clf()
-               plt.close()
-          
-          return coeff_dict
   

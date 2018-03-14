@@ -4,6 +4,7 @@ np.set_printoptions(precision=5)
 np.set_printoptions(suppress=True)
 np.set_printoptions(linewidth=1e6, edgeitems=1e6)
 from PProbe_selectors import Selectors
+from PProbe_util import Util
 ppsel = Selectors(None)
 
 
@@ -39,7 +40,9 @@ class DataIO:
                from PProbe_contacts import Contacts
                self.prune_cont = Contacts.prune_cont
                self.ppcont = Contacts()
+
      def extract_raw(self,features_list):
+          pput = Util()
           master_array=self.initialize_master(len(features_list))
           #translates items from feature dictionary to master array column type
           f2m = {'so4_cc_fofc_out':'ccSf',
@@ -58,8 +61,8 @@ class DataIO:
                  'so4_fofc_stdev_cc60':'sdSf60',
                  'so4_2fofc_mean_cc60':'ccS260',
                  'so4_2fofc_stdev_cc60':'sdS260',
-                 'fofc_sig_out':'fofc_sigo',
-                 '2fofc_sig_out':'2fofc_sigo',
+                 'fofc_sigo_scaled':'fofc_sigo',
+                 '2fofc_sigo_scaled':'2fofc_sigo',
                  'charge':'charge',
                  'db_id':'id',
                  'ol':'ol',
@@ -84,40 +87,25 @@ class DataIO:
                  'omit':'omit',
                  'vol_fofc':'vf',
                  'vol_2fofc':'v2',
-                 'dmove':'dmove'}
-         
-          for index,features in enumerate(features_list):
+                 'dmove':'dmove',
+                 'unal':'unal'}
+          for index,fdict in enumerate(features_list):
+               if 'fofc_sigo_scaled' not in fdict.keys():
+                    fdict['fofc_sigo_scaled'] = pput.scale_density(fdict['fofc_sig_out'],fdict['solc'])
+               if '2fofc_sigo_scaled' not in fdict.keys():
+                    fdict['2fofc_sigo_scaled'] = pput.scale_density(fdict['2fofc_sig_out'],fdict['solc'])
                for column in f2m.keys():
-                    master_array[f2m[column]][index] = features[column]
+                    master_array[f2m[column]][index] = fdict[column]
           return master_array
-
-     def store_contacts(self,features):
-          #run on every individual peak?
-          db_id = features['db_id']
-          contacts = features['contacts']
-          strip_contacts = features['strip_contacts']
-          s_contacts = features['s_contacts']
-          w_contacts = features['w_contacts']
-          p_contacts = features['peak_contacts']
-          f = open(db_id+"_contacts.list",'w')
-          for c_batch,c_list in  zip(("ORI","STR","SO4","WAT","PKI"),(contacts,strip_contacts,s_contacts,w_contacts,p_contacts)):
-               for contact in c_list: #list of dictionaries
-                    #simplify output for lookup later (huge amount of data)
-                    dist='{:3.2f}'.format(contact['distance'])
-                    resat = contact['resname']+"-"+contact['name']
-                    chres = contact['chain']+str(contact['resid'])
-                    outstr = ','.join((db_id,c_batch,resat,chres,dist))
-                    print >> f,outstr
-          f.close()
-
 
 
      def initialize_master(self,num_peaks):
           """
-          Define the core data structure that holds all peak information
+          Define the master numpy array that holds all peak information for numerical analysis 
           including features, calculated values, contact lists, etc.
           FIELD       Data Type     Description
-          id          string        unique id for every peak --> abcd_X_00000 abcd=pdbid or "user",X = chainid, 00000 = serial number
+          unal        i8         desc    -- unal for each input peak, completely unique 64bit int
+          id          string     desc    --  id for every peak --> abcd_X_00000 abcd=pdbid or "user",X = chainid, 00000 = serial number
           ccSf        f4         feature -- RScorr for S refined against fofc
           ccWf        f4         feature -- RScorr for W refined against fofc
           ccS2        f4         feature -- RScorr for S refined against 2fofc
@@ -192,7 +180,7 @@ class DataIO:
 
           """
 
-          self.master_cols = ["id","ccSf","ccWf","ccS2","ccW2","ccSifi","ccSifo","ccSi2i",
+          self.master_cols = ["unal","id","ccSf","ccWf","ccS2","ccW2","ccSifi","ccSifo","ccSi2i",
                               "ccSi2o","ccSifr","ccSi2r","ccWif","ccWi2","ccSf60","sdSf60","ccS260",
                               "sdS260","vf","v2","charge","fofc_sigo","2fofc_sigo","dmove","ol",
                               "om","oh","wl","wm","wt","sl","sm","st","sp",
@@ -202,7 +190,7 @@ class DataIO:
                               "cchiS","cchiW","fc","edc","cc","mf","rc","scr1",
                               "scr2","scr3"]
 
-          self.master_fmts = ['S16','f4','f4','f4','f4','f4','f4','f4',
+          self.master_fmts = ['i8','S16','f4','f4','f4','f4','f4','f4','f4',
                               'f4','f4','f4','f4','f4','f4','f4','f4',
                               'f4','f4','f4','f4','f4','f4','f4','i1',
                               'i1','i1','i1','i1','i1','i1','i1','i1','i1',

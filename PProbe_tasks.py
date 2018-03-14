@@ -36,7 +36,7 @@ class PhenixTasks:
         self.dev_opts = {'set_chain':False,'pdb_out_str':"",
                          'renumber':False,'write_ref_pdb':False,
                          'write_maps':False,'ressig':False,
-                         'write_contacts':False}
+                         'write_contacts':False,'proc_sol':True}
 
         #command line expects 5 args as listlike (NB: filenames) 
         #   resolution,input_pdb,input_strip_pdb,peaks_pdb,input_map_mtz 
@@ -54,18 +54,26 @@ class PhenixTasks:
             phil_f = open(phenix_params,'r')
             phil_str = phil_f.read()
             phil_f.close()
-            master_phil = phil.parse(phil_str)
-            self.phe_par = master_phil.extract()
+            pprobe_phil = phil.parse(phil_str)
+            self.phe_par = pprobe_phil.extract()
             self.model_pdb = self.phe_par.input.pdb.model_pdb[0]
             self.strip_pdb = self.phe_par.input.pdb.strip_pdb[0]
             self.peaks_pdb = self.phe_par.input.pdb.peaks_pdb[0]
             self.map_coeff = self.phe_par.input.input_map.map_coeff_file[0]
             self.score_res = self.phe_par.input.parameters.score_res[0]
             self.out_prefix  = self.phe_par.output.output_peak_prefix[0][0:4]
+            # I can't figure out this phil parce thing, so bad hack here
+            for option in self.phe_par.input.parameters.map_omit_mode:
+                if option[0] == "*":
+                    self.omit_mode = option[1::]
+
             """
             fix dev options here
             """
-
+            if self.omit_mode == "valsol":
+                #self.dev_opts['renumber'] = True
+                self.dev_opts['proc_sol'] = False
+            
     def peak_process(self,pdict,symmetry,orig_pdb_hier,strip_pdb_hier,
                      peak_pdb_hier,struct_data,ptype='unproc',write_maps=False):
         ppfeat = self.ppfeat
@@ -100,8 +108,9 @@ class PhenixTasks:
         rsr_object.ref_contacts()
         ppcont.parse_contacts(pdict)
         rsr_object.rotations(peak_object,ref_object,write_pdb=self.dev_opts['write_ref_pdb'])
-        ppfeat.basic_features(pdict,peak_object)
         pdict['solc'] = struct_data.solvent_content
+        ppfeat.basic_features(pdict,peak_object)
+
 
         #print "PROCESS ERROR! Peak %s aborted" % pdict['db_id']
         #return "ERROR"
@@ -184,11 +193,12 @@ class PhenixTasks:
             p_unal = pdict['unal']
             close_solvent = ppcont.prune_cont(pdict['cont_db'][p_unal],omit_models=[1,2,4],uniquify=True,unires=True,omit_null=True,cutoff=3.5)
             cls_count = 0
-            for cont in close_solvent:
-                if cont['unat'] in omit_sol_unat and cont['unat'] not in added_sol_unat:
-                    sol_peaks_toadd.append(cont['unal'])
-                    added_sol_unat.append(cont['unat'])
-                    cls_count = cls_count + 1
+            if self.dev_opts['proc_sol']: #process associated solvent atoms?
+                for cont in close_solvent:
+                    if cont['unat'] in omit_sol_unat and cont['unat'] not in added_sol_unat:
+                        sol_peaks_toadd.append(cont['unal'])
+                        added_sol_unat.append(cont['unat'])
+                        cls_count = cls_count + 1
             processed = self.peak_process(pdict,symmetry,orig_pdb_hier,strip_pdb_hier,peak_pdb_hier,struct_data,
                                           write_maps=self.dev_opts['write_maps'],ptype='peakin')
             if processed == "ERROR":
@@ -239,15 +249,6 @@ class PProbeTasks:
         from PProbe_kde import KDE as PPKDE
         from PProbe_dataio import DataIO as PPio
 
-    def sigma_flag(self,master_array,columns,verbose=False):
-        ppfilt = PPfilt(verbose=verbose)
-        sig_rej = ppfilt.cutoff_rejects(master_array,columns)
-        return sig_rej
-
-    def sat_flag(self,master_array):
-        ppfilt = PPfilt()
-        return ppfilt.peak_sat(master_array)
-
     def post_process(self,data_array,peak_feat_list):
         #sig_flags flags outliers by absolute cutoffs, np_array index
         #sat_dict is dict of (id,score) for possible satellite peaks, by db_id
@@ -256,34 +257,35 @@ class PProbeTasks:
         ppcont = PPcont(phenix_python=False)
         pput = PPutil()
         ppclass = PPclass(verbose=False)
-        #need a prob estimate for not water for sat peaks and result flags
+        ppio = PPio()
+        ppfilt = PPfilt(verbose=False)
+
         prob_arr,pred_arr,labels,kdedict = self.kde_score(data_array)
         print "CALCULATING HISTOGRAM LIKELIHOODS FOR %s PEAKS" % prob_arr.shape[0]
 
         #reassign flags based on histogram derived probabilities
         data_array['rc'] = ppclass.score_flags(data_array)
-        sig_flags = self.sigma_flag(data_array,data_array.dtype.names,verbose=False)
+        sig_flags = ppfilt.cutoff_rejects(data_array,data_array.dtype.names)
         n_outliers = np.count_nonzero(sig_flags)
         if n_outliers > 0:
             print "FLAGGED %s PEAK(S) AS OUTLIERS (Status = 2)" % n_outliers
-        sat_dict = self.sat_flag(data_array)
+        sat_dict = ppfilt.peak_sat(data_array)
 
         id_lookup = {}
-        for pind,proc_peak in enumerate(data_array):
-            id_lookup[proc_peak['id']] = pind
 
         for pind,peak_dict in enumerate(peak_feat_list):
             peakid = peak_dict['db_id']
-            arr_ind = id_lookup[peakid]
-            peak_dict['proc_data'] = data_array[arr_ind]
-            if peak_dict['proc_data']['id'] != peakid:
-                print "ID MATCH ERROR!",peakid,peak_dict['proc_data']
-                peak_dict['status'] = 1
+            unal = peak_dict['unal']
+            arr_ind = np.nonzero(data_array['unal'] == unal)
+            if len(arr_ind) > 1:
+                print "   ERROR!  Duplicate ID in array!",peakid,unal
                 continue
-            
-            peak_dict['prob_data'] = prob_arr[arr_ind]
-            peak_dict['pred_data'] = pred_arr[arr_ind]
-            peak_dict['label'] = labels[arr_ind]
+            else:
+                arr_ind = arr_ind[0][0]
+            peak_dict['proc_data'] = data_array[arr_ind] # processed feature data
+            peak_dict['prob_data'] = prob_arr[arr_ind] #class probabilities
+            peak_dict['pred_data'] = pred_arr[arr_ind] #predictions
+            peak_dict['label'] = labels[arr_ind] #input labels
             if sig_flags[arr_ind]:
                 peak_dict['status'] = 2
             peak_dict['resid_names'] = kdedict['populations']
@@ -302,12 +304,13 @@ class PProbeTasks:
                 peak_dict.pop(key,None)
 
 
-
     def data_process(self,master_array):
-        ppclass = PPclass(verbose=True)
+        ppclass = PPclass(verbose=False)
         ppfilt = PPfilt()
         ppcont = PPcont(phenix_python=False)
-        ppkde = PPKDE()
+        ppio = PPio()
+        mdict = ppio.read_master_dict()
+        ppkde = PPKDE(mdict)
         print "PROCESSING FEATURES"
         master_array.sort(order=['res','id'])
         selectors = PPsel(master_array)
@@ -317,8 +320,6 @@ class PProbeTasks:
         for col in ['id','ori','res','ccSf','ccWf','ccS2','ccW2','ccSifi','ccSifo','ccSi2i','ccSi2o',
                     'ccSifr','ccSi2r','ccWif','ccWi2','ccSf60','sdSf60','ccS260','sdS260','vf','v2','2fofc_sigo']:
             proc_array[col] = master_array[col]
-        #rescale density level to account for lack of variance in solvent region
-        master_array['2fofc_sigo'] = np.divide(master_array['2fofc_sigo'],np.sqrt(1.0-master_array['solc']))
         ppclass.standardize_data(proc_array,post_pca=False)
         ppclass.pca_xform_data(proc_array)
         ppclass.standardize_data(proc_array,post_pca=True)
@@ -328,11 +329,7 @@ class PProbeTasks:
         ppclass.density_da(proc_array,master_array)
         ppclass.contact_da(master_array)
         ppclass.standardize_data(master_array,post_pca=True,composite=True)
-        #prob is prob not water from logistric regression on chi sq values
-        chiS = np.add(master_array['chiS'],master_array['cchiS'])
-        chiW = np.add(master_array['chiW'],master_array['cchiW'])
-        chiD = np.subtract(chiS,chiW)
-        master_array['prob']=1.0/(1.0+np.exp(-(0.28-0.106*chiD)))#prob not water
+        ppclass.chi_prob(master_array)
         print "     Scored ED/CC for %s peaks" % master_array.shape[0]
         master_array['rc']  = ppclass.score_flags(master_array)
         master_array['fc']  = ppclass.peak_fc(master_array)
@@ -341,7 +338,7 @@ class PProbeTasks:
 
 
     def validate_peaks(self,all_peak_db):
-        # updates peak status 
+        # updates peak status from a dictionary of peaks
         # first pass, status is 0-6
         # then updates status by confirming w and s
         # using these confirmed peaks as anchors when necessary, update contacts
@@ -372,13 +369,15 @@ class PProbeTasks:
             if updated_peaks > 0 and iterations < 5:
                 print "Updated status for %s peak(s),rescoring cycle %s . . . " % (updated_peaks,iterations)
                 input_feat = list(pdict  for pdict in all_peak_db.values() if pdict['ptype'] == 'peakin')
-                master_array=ppio.extract_raw(input_feat)
-                self.data_process(master_array)
-                self.post_process(master_array,input_feat)
+                if len(input_feat) > 0:
+                    master_array=ppio.extract_raw(input_feat)
+                    self.data_process(master_array)
+                    self.post_process(master_array,input_feat)
                 ori_feat = list(pdict  for pdict in all_peak_db.values() if pdict['ptype'] == 'modsol')
-                assp_array=ppio.extract_raw(ori_feat)
-                self.data_process(assp_array)
-                self.post_process(assp_array,ori_feat)
+                if len(ori_feat) > 0:
+                    assp_array=ppio.extract_raw(ori_feat)
+                    self.data_process(assp_array)
+                    self.post_process(assp_array,ori_feat)
                 print "-"*79
             else:
                 converged = True
@@ -391,39 +390,15 @@ class PProbeTasks:
 
     def kde_score(self,master_array):
         #master_array = np.sort(master_array,order=['id'])
-        ppkde = PPKDE()
+        ppio = PPio()
+        mdict = ppio.read_master_dict()
+        ppkde = PPKDE(mdict,verbose=True)
         prob_arr = ppkde.kde_score(master_array)
         pred_arr = ppkde.predict_kde(prob_arr)
         labels = ppkde.kde_label(master_array)
-        for pind,peak in enumerate(master_array):
-            #if (pred_arr[pind,2,0] != pred_arr[pind,3,0]) and labels[pind] > 0:
-            print "NEWP",peak['id'],pred_arr[pind,:,0],labels[pind],peak['score'],peak['cscore'],peak['prob'],peak['c1']
         kdedict = ppkde.kdedict
         return prob_arr,pred_arr,labels,kdedict
         
-
-    def ctrain(self,master_array,tplot=True):
-        from PProbe_train import TrainingFunctions as PPtrain
-        trafunc = PPtrain()
-        print trafunc.contact_jsu(master_array,plot=tplot)
-
-    def comptrain(self,master_array,tplot=True):
-        from PProbe_train import TrainingFunctions as PPtrain
-        trafunc = PPtrain()
-        ppio = PPio()
-        md = ppio.read_master_dict()
-        md['composite'] = trafunc.composite_jsu_coeff(master_array,plot=tplot)
-        ppio.write_master_dict(md)
-
-
-
-
-
-    def train_chi(self,master_array):
-        from PProbe_train import TrainingFunctions as PPtrain
-        trafunc = PPtrain()
-        trafunc.chiD_jsu(master_array,plot=True)
-
 
     def train_model(self,master_array,master_dictionary,tplot=True,train_steps=None,write_data=False,output_root="train"):
         from PProbe_train import TrainingFunctions as PPtrain
@@ -438,9 +413,6 @@ class PProbeTasks:
         master_array.sort(order=['res','id'])
         selectors = PPsel(master_array)
         master_array['res'] = np.clip(master_array['res'],0.6,5.0).astype(np.float16)
-        #correct peak height by solc
-        master_array['2fofc_sigo'] = np.divide(master_array['2fofc_sigo'],np.sqrt(1.0-master_array['solc']))
-
         proc_array = np.zeros(master_array.shape[0],dtype=selectors.proc_array_dtype)
         for col in ['id','ori','res','ccSf','ccWf','ccS2','ccW2','ccSifi','ccSifo','ccSi2i','ccSi2o',
                     'ccSifr','ccSi2r','ccWif','ccWi2','ccSf60','sdSf60','ccS260','sdS260','vf','v2','2fofc_sigo']:
@@ -485,13 +457,13 @@ class PProbeTasks:
             ppclass = PPclass(input_dict=master_dictionary,verbose=True)
             #rescales score and cscore 
             ppclass.standardize_data(master_array,post_pca=True,composite=True)
-            master_dictionary['chiD'] = trafunc.chiD_jsu(master_array,plot=True)
+            master_dictionary['chiD'] = trafunc.chiD_fit(master_array,plot=True)
             
         if 'kde' in train_steps:
             ppkde = PPKDE(master_dictionary,train=True)
             master_dictionary['kde'] = ppkde.train_kde(master_array,master_dictionary)
-            ppkde = PPKDE(master_dictionary,train=False)
             if tplot:
+                ppkde = PPKDE(master_dictionary,train=False)
                 ppkde.plot_kde(outstr=output_root)
         
 
@@ -504,7 +476,9 @@ class PProbeTasks:
 
 
     def data_vs_hist(self,master_array,outstr="test"):
-        ppkde = PPKDE()
+        ppio = PPio()
+        mdict = ppio.read_master_dict()
+        ppkde = PPKDE(mdict)
         d1 = master_array['score']
         d2 = master_array['cscore']
         labels=ppkde.kde_label(master_array)
@@ -591,3 +565,6 @@ class PProbeTasks:
         print >> fout,build_s,build_w
         fout.close()
 
+    def scr(self,data_array):
+        ppclass = PPclass(verbose=True)
+        ppclass.score_flags(data_array)

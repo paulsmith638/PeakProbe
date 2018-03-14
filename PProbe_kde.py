@@ -3,15 +3,18 @@ import numpy as np
 np.set_printoptions(precision=5)
 np.set_printoptions(suppress=True)
 np.set_printoptions(linewidth=1e6, edgeitems=1e6)
+if 'matplotlib' not in sys.modules:
+
+     mpl.use('Agg')
 import matplotlib as mpl
-mpl.use('Agg')
 import matplotlib.pyplot as plt
+mpl.rcParams.update({'font.size': 36})
 from PProbe_dataio import DataIO
 from PProbe_selectors import Selectors
 from PProbe_stats import StatFunc
 from PProbe_util import Util
 from matplotlib import cm
-mpl.rcParams.update({'font.size': 36})
+
 
 class KDE:
      def __init__(self,master_dictionary,train=False,verbose=False):
@@ -30,7 +33,6 @@ class KDE:
           #expected value of MLE of alpha coefficients of dirichlet distribution
           #trained against probabilities from +1 smoothed counts from entire PDB
           self.dir_prior = np.array([ 0.8516044 ,  0.04814615,  0.05036076,  0.04988869])
-          self.chi_prior1 = np.array([0.97,0.01,0.01,0.01])
 
      def joint_likelihood(self,feat1,feat2,prior):
           #generates joint lh from 1d vectors (independent features)
@@ -117,15 +119,11 @@ class KDE:
                xrange = xmax-xmin
                plotxmin = xmin+0.001*xrange
                plotxmax = xmax-0.001*xrange
-
-
                p1x = plotx[labels==1]
                p2x = plotx[labels==2]
                p3x = plotx[labels==3]
                p4x = plotx[labels==4]
-               
 
-               #linear KDE, all data
                kdestatdict = {}               
                xshist,xsed = np.histogram(plotx,bins=bins,range=(plotxmin,plotxmax),normed=True)
                xcenters = xsed[:-1] + 0.5*(xsed[1:] - xsed[:-1])
@@ -237,11 +235,10 @@ class KDE:
           resid_names = kdedict['populations']
           features = kdedict['features']
           prior_list = [self.flat_prior,self.dir_prior,self.flat_prior] #flat used twice, updated
-          hack_prob = data_array['prob'] - 0.5
           prob_arr = np.zeros((data_array.shape[0],len(prior_list),len(resid_names)))
           for priorind in range(len(prior_list)):
                prior = prior_list[priorind]
-               prob_arr[:,priorind,:] = self.kde_grid_prob('score','cscore',data_array['score'],data_array['cscore']+hack_prob,prior)
+               prob_arr[:,priorind,:] = self.kde_grid_prob('score','cscore',data_array['score'],data_array['cscore'],prior)
 
 
           #assign structure specific probabilities based on empirical prior
@@ -254,20 +251,24 @@ class KDE:
                     #update prior based on counts within a structure
                     #starting from flat prior
                     probin = prob_arr[pdbind,2,:]
-                    predin = np.argmax(probin,axis=1)+1 # top prediction
-                    #print "PREDS",list(np.count_nonzero(predin==x) for x in range(6))
+                    predin = np.argmax(probin,axis=1) + 1
+                    psort = np.sort(probin,axis=1)
+                    diff = psort[:,-1] - psort[:,-2]
+                    #print diff
                     schi = np.add(datain['chiS'],datain['cchiS'])
                     wchi = np.add(datain['chiW'],datain['cchiW'])
                     #set stringent criteria for observing in population
                     all_good = np.logical_and(datain['fc'] == 0,datain['edc'] > 0)
+                    strong = diff > 10.0
+                    #all_good = np.logical_and(all_good,strong)
                     not_w = datain['prob'] > 0.8
                     good_s = np.logical_and(datain['llgS'] > 0,not_w)
                     good_w = np.logical_and(datain['llgW'] > 0,np.invert(not_w))
-                    mismatch = np.invert(np.logical_or(good_s,good_w))
+                    mismatch = np.logical_or(np.logical_and(not_w,schi > 30.0),np.logical_and(good_w,wchi < 25.0))
                     valid_w = np.logical_and(predin == 1,np.logical_and(good_w,wchi < 35.0))
                     valid_s = np.logical_and(predin == 2,np.logical_and(good_s,schi < 35.0))
-                    valid_o = np.logical_and(predin == 3,np.logical_and(mismatch,wchi > 25.0))
-                    valid_m = np.logical_and(predin == 4,np.logical_and(mismatch,schi < 25.0))
+                    valid_o = np.logical_and(predin == 3,np.logical_and(strong,wchi > 25.0))
+                    valid_m = np.logical_and(predin == 4,np.logical_and(strong,schi < 25.0))
                     vgw = np.logical_and(all_good,valid_w)
                     vgs = np.logical_and(all_good,valid_s)
                     vgo = np.logical_and(all_good,valid_o)
@@ -278,26 +279,16 @@ class KDE:
                     for predlab in range(len(resid_names)):
                          count_mask = np.logical_and(predin==predlab+1,valid)
                          count_ids = set(datain['id'][count_mask])
-                         counts.append(len(count_ids))
-
+                         #counts.append(len(count_ids))
+                         counts.append(np.count_nonzero(count_mask))
                     #counts of each population + 1 (additive smoothing / dirichlet with alpha=1)
                     countin = np.array(counts,dtype=np.float32)
                     alpha= (countin+1.0)/(np.nansum(countin)+len(resid_names))
                     prob_arr[pdbind,2,:] = self.kde_grid_prob('score','cscore',datain['score'],datain['cscore'],alpha)
-                    if i == 2:
+                    if i == 2 and self.verbose:
                          outlist = [pdbid,i+1,len(pdbind),resid_names[0],counts[0],resid_names[1],counts[1],
                                     resid_names[2],counts[2],resid_names[3],counts[3]]
-                         #print "     PDB %4s Cycle %1d POPCOUNT (%5d): %3s %5d %3s %5d %3s %5d %3s %5d" % tuple(outlist)
-          #cprob = np.clip(data_array['prob'],1E-5,(1.0-1E-5))
-          #llgw = np.log(1.0 - cprob) - np.log(cprob)
-          #prob_arr[:,3,0] = llgw #np.add(prob_arr[:,2,0],llgw)
-          #prob_arr[:,3,1] = np.add(prob_arr[:,2,1],-llgw)
-          #prob_arr[:,3,2] = np.add(prob_arr[:,2,2],-llgw)
-          #prob_arr[:,3,3] = np.add(prob_arr[:,2,3],-llgw)
-
-
-          #for pind,peak in enumerate(data_array):
-          #     print "NEWB",peak['id'],peak['score'],peak['cscore'],peak['prob'],peak['ori'],prob_arr[pind,0,:],prob_arr[pind,1,:],prob_arr[pind,2,:],prob_arr[pind,3,:]
+                         print "     PDB %4s Cycle %1d POPCOUNT (%5d): %3s %5d %3s %5d %3s %5d %3s %5d" % tuple(outlist)
           return prob_arr
 
 
@@ -365,13 +356,11 @@ class KDE:
           return new_grid
 
 
-     def make_plot(self,prob2d,pick2d,prior=None):
+     def make_plot(self,prob2d,pick2d):
           kdedict = self.kdedict
           resid_names = kdedict['populations']
           features = ('score','cscore')
           numfeat = len(features)
-          if prior is None: #default flat
-               prior = self.flat_prior
           x_stat = features[0]
           y_stat = features[1]
           xcenters = kdedict[x_stat]['xcent']
@@ -383,6 +372,8 @@ class KDE:
           sub.set_title("PProbe_Scores")
           sub.set_xlabel('Electron Density Score')
           sub.set_ylabel('Contact Score')
+          sub.set_xlim([-5.0,6.0])
+          sub.set_ylim([-5.0,5.0])
           cmap = mpl.colors.ListedColormap(['gray','royalblue','orangered','g','yellow','gray'])
           bounds=[0,1,2,3,4,5,6]
           norm = mpl.colors.BoundaryNorm(bounds, cmap.N)
@@ -390,7 +381,7 @@ class KDE:
           grid= self.pop_lasso()
           mask = np.invert(np.logical_or(grid==1,grid==2))
           masked_in = np.ma.masked_where(mask,grid)
-          cmap2 = mpl.colors.ListedColormap(['gray','blue','red','g','yellow','gray']) 
+          cmap2 = mpl.colors.ListedColormap(['gray','blue','red','cyan','yellow','gray']) 
           norm2 = mpl.colors.BoundaryNorm(bounds, cmap2.N)
           sub.pcolormesh(np.array(xcenters),np.array(ycenters),masked_in.T,cmap=cmap2,edgecolors='None',norm=norm2)
           sub.axhline(lw=5,c='k')
@@ -405,7 +396,7 @@ class KDE:
                prior = self.dir_prior
           prob2d,pick2d = self.gen_plot_hist(prior=prior)
           sub = self.make_plot(prob2d,pick2d)
-          plt.savefig("KDE_grid2"+outstr+".png")
+          plt.savefig("KDE_grid_"+outstr+".png")
           plt.clf()
           plt.close()
 
@@ -414,23 +405,6 @@ class KDE:
           print "PLOTTING 2D DATA GRID"
           prob2d,pick2d = self.gen_plot_hist(prior=prior)
           sub = self.make_plot(prob2d,pick2d)
-          """
-          kdedict = self.kdedict
-          resid_names = kdedict['populations']
-          features = ('score','cscore')
-          x_stat = features[0]
-          y_stat = features[1]
-          xcenters = kdedict[x_stat]['xcent']
-          ycenters = kdedict[y_stat]['xcent']
-          prob2d,pick2d = self.gen_plot_hist(prior=prior)
-          gridplot = plt.figure(figsize=(32,32))
-          sub=gridplot.add_subplot(1,1,1)
-          sub.set_title("PProbe_Scores")
-          sub.set_xlabel('Electron Density Score')
-          sub.set_ylabel('Contact Score')
-          sub.pcolormesh(np.array(xcenters),np.array(ycenters),pick1d.T,cmap=cm.Set1)
-          sub.contour(np.array(xcenters),np.array(ycenters),new_grid.T,levels=[0],colors=['black',],linewidths=5.0,linestyles='dotted')
-          """
           goodb = batches > 0
           batches = batches[goodb]
           score=score[goodb]

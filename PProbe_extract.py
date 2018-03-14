@@ -105,6 +105,9 @@ class FeatureExtraction:
             features['2fofc_sig_in'] = peak_object.peak_2fofc
             features['fofc_sig_out'] = peak_object.density_at_point(peak_object.local_map_fofc,features['wat_fofc_ref_xrs'],features['wat_fofc_coord_out'])
             features['2fofc_sig_out'] = peak_object.density_at_point(peak_object.local_map_2fofc,features['wat_fofc_ref_xrs'],features['wat_fofc_coord_out'])
+            #rescale density level to account for lack of variance in solvent region
+            features['2fofc_sigo_scaled'] = pput.scale_density(features['2fofc_sig_out'],features['solc'])
+            features['fofc_sigo_scaled'] = pput.scale_density(features['fofc_sig_out'],features['solc'])
             new_coord = features['wat_fofc_coord_out']
             features['dmove'] = np.linalg.norm(np.subtract(new_coord,(5.0,5.0,5.0)))
 

@@ -107,4 +107,6 @@ class Util:
             int_mask = data_array['batch'] % num_groups
             return int_mask
 
- 
+      def scale_density(self,sigma,solc):
+            return sigma/np.sqrt(1.0-solc)
+

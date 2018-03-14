@@ -17,8 +17,8 @@ from mmtbx import find_peaks
 from cctbx import maptbx
 from cctbx.array_family import flex
 import iotbx.pdb 
+from libtbx import easy_pickle
 from cStringIO import StringIO
-import numpy as np
 
 import mmtbx.utils
 from libtbx.utils import Sorry
@@ -26,6 +26,7 @@ from libtbx.utils import multi_out
 
 
 from PProbe_tasks import PProbeTasks
+from PProbe_tasks import PhenixTasks
 from PProbe_dataio import DataIO
 
 ppio = DataIO()
@@ -94,7 +95,7 @@ input {
     score_res = None
       .type = float
       .short_caption = input resolution for peak scoring
-    map_omit_mode = *omitsw omitsol asis
+    map_omit_mode = *omitsw omitsol valsol asis
       .type = choice
       .short_caption = atom omits during map generation
       .help = Options for atom omits during map generation or allowing mapin
@@ -149,9 +150,12 @@ output {
   output_file_name_prefix = None
     .type = str
     .short_caption = Output prefix
-  output_peak_prefix = user
+  output_peak_prefix = peak
     .type = str
     .short_caption = label for peak data (must be 4 characters)
+  output_raw = False
+    .type=bool
+    .help = Output .pkl file for all extracted data
 }
 pprobe{
   ori_mod = False
@@ -219,14 +223,58 @@ def run(args):
   run_pprobe(all_params)
 
 
-def run_pprobe(all_params):
-  pptask = PProbeTasks(phenix_params=all_params.output.output_file_name_prefix+"_pprobe.param")
+def run_pprobe(all_params, log = sys.stdout):
+  print >> log, "-"*79
+  print >> log, "PPROBE PEAK ANALYSIS:"
+
   ppio = DataIO()
-  features_list=pptask.feature_extract()
-  features_array=ppio.extract_raw(features_list)
-  ppio.store_features_csv(features_array,all_params.output.output_file_name_prefix+"_data.csv")
-  results = pptask.score_features(features_array,plot=False)
-  ppio.store_results_csv(results,all_params.output.output_file_name_prefix+"_results.csv")
+  pptask = PhenixTasks(phenix_params=all_params.output.output_file_name_prefix+"_pprobe.param")
+  peak_unal_db=pptask.feature_extract()
+
+  if all_params.output.output_raw == True:
+    data_list = [peak_unal_db,]
+    easy_pickle.dump(all_params.output.output_file_name_prefix+".pkl.gz" ,data_list)
+
+
+  input_feat=list(pdict for pdict in peak_unal_db.values() if pdict['ptype'] == 'peakin')
+  ori_feat=list(pdict for pdict in peak_unal_db.values() if pdict['ptype'] == 'modsol')
+  master_array=ppio.extract_raw(input_feat)
+
+  if len(ori_feat) > 0:
+    assp_array = ppio.extract_raw(ori_feat)
+  else:
+    assp_array = None
+
+  pptask = PProbeTasks()
+  pptask.data_process(master_array)
+  pptask.post_process(master_array,input_feat)
+  print "-"*79
+
+  peak_id_list = list(pdict['db_id'] for pdict in input_feat)
+  assp_id_list = list(pdict['db_id'] for pdict in ori_feat)
+
+  if assp_array is not None:
+    pptask.data_process(assp_array)
+    pptask.post_process(assp_array,ori_feat)
+
+  if all_params.output.output_raw == True:
+    data_list = [peak_unal_db,]
+    easy_pickle.dump(all_params.output.output_file_name_prefix+".pkl.gz" ,data_list)
+
+
+  pptask.validate_peaks(peak_unal_db)
+  pptask.data_vs_hist(master_array,outstr=(all_params.output.output_file_name_prefix))
+
+  print "-"*79
+  id_unal_list = []
+  for unal,pdict in peak_unal_db.iteritems():
+    if pdict['model'] in [3,4]:
+      id_unal_list.append((pdict['db_id'],unal))
+  id_unal_list.sort(key = lambda x: x[0])
+
+  for peakid,unal in id_unal_list:
+    print ppio.peak_report(peak_unal_db[unal])
+
 
 def process_inputs(args, log = sys.stdout):
   print >> log, "-"*79
@@ -301,6 +349,7 @@ def process_inputs(args, log = sys.stdout):
   crystal_symmetry = check_symmetry(inputs,params,log)
   model_pdb_input = iotbx.pdb.input(file_name = params.input.pdb.model_pdb)
   model_hier = model_pdb_input.construct_hierarchy()
+  model_hier.remove_hd()
   model_xrs = model_hier.extract_xray_structure(crystal_symmetry = crystal_symmetry)
 
   #strip pdb if needed,write result
@@ -308,7 +357,7 @@ def process_inputs(args, log = sys.stdout):
     strip_xrs,strip_hier = create_strip_pdb(model_hier,model_xrs,params.input.parameters.map_omit_mode,log)
     strip_filename = params.output.output_file_name_prefix+"_pprobe_strip.pdb"
     print >> log, "Writing Strip PDB to: ",strip_filename
-    strip_hier.write_pdb_file(file_name = strip_filename,crystal_symmetry=crystal_symmetry,append_end=True)
+    strip_hier.write_pdb_file(file_name = strip_filename,crystal_symmetry=crystal_symmetry,append_end=True,anisou=False)
     params.input.pdb.strip_pdb = strip_filename
   elif params.input.parameters.map_omit_mode == "asis":
     strip_xrs,strip_hier = model_xrs,model_hier
@@ -316,6 +365,7 @@ def process_inputs(args, log = sys.stdout):
   else:
     strip_pdb_input = iotbx.pdb.input(file_name = params.input.pdb.strip_pdb)
     strip_hier = strip_pdb_input.construct_hierarchy()
+    strip_hier.remove_hd()
     strip_xrs = strip_hier.extract_xray_structure(crystal_symmetry = crystal_symmetry)
 
 
@@ -333,32 +383,39 @@ def process_inputs(args, log = sys.stdout):
     maps.write_mtz_file(map_fname)
     params.input.input_map.map_coeff_file = params.output.output_file_name_prefix+"_pprobe_maps.mtz"
   else:
+    print "READING MAP FILE: ",params.input.input_map.map_coeff_file
     #setup input map coefficients
+
     map_coeff = reflection_file_utils.extract_miller_array_from_file(
       file_name = params.input.input_map.map_coeff_file,
       label     = params.input.input_map.map_diff_label,
       type      = "complex",
       log       = null_log)
+
     if params.input.parameters.score_res is None:
-      params.input.parameters.score_res = f_obs.d_min()
+      params.input.parameters.score_res = map_coeff.d_min()
       print >> log, "  Determined Resolution Limit: %.2f" % params.input.parameters.score_res
       print >> log, "    -->Override with \"score_res=XXX\""
     map_fname = params.input.input_map.map_coeff_file
     
 
-
   # if peaks not input, find and write to pdb
   if params.input.pdb.peaks_pdb is None:
-    peaks_result = find_map_peaks(params,strip_xrs,log)
-    pdb_str = peaks_pdb_str(peaks_result)
-    peak_pdb = iotbx.pdb.input(source_info=None, lines=flex.split_lines(pdb_str))
-    peak_hier = peak_pdb.construct_hierarchy()
-    peak_filename =params.output.output_file_name_prefix+"_pprobe_peaks.pdb" 
-    f = open(peak_filename, "w")
-    print >> log,"Writing Peaks to %s:" % peak_filename
-    f.write(peak_hier.as_pdb_string(crystal_symmetry=crystal_symmetry))
-    f.close()
-    params.input.pdb.peaks_pdb = peak_filename
+    if params.input.parameters.map_omit_mode != "valsol":
+      peaks_result = find_map_peaks(params,strip_xrs,log)
+      pdb_str = peaks_pdb_str(peaks_result)
+      peak_pdb = iotbx.pdb.input(source_info=None, lines=flex.split_lines(pdb_str))
+      peak_hier = peak_pdb.construct_hierarchy()
+      peak_filename =params.output.output_file_name_prefix+"_pprobe_peaks.pdb" 
+      print >> log,"Writing Peaks to %s:" % peak_filename
+      peak_hier.write_pdb_file(file_name = peak_filename,crystal_symmetry=crystal_symmetry,append_end=True,anisou=False)
+      params.input.pdb.peaks_pdb = peak_filename
+    else:
+      peak_filename =params.output.output_file_name_prefix+"_pprobe_peaks.pdb" 
+      peak_xrs,peak_hier = create_sol_pdb(model_hier,model_xrs,params.input.parameters.map_omit_mode,log)
+      print >> log,"Writing Peaks to %s:" % peak_filename
+      peak_hier.write_pdb_file(file_name = peak_filename,crystal_symmetry=crystal_symmetry,append_end=True,anisou=False)
+      params.input.pdb.peaks_pdb = peak_filename
 
   #Wrap up, display file names and info for manual input
   #save parameters for next stage
@@ -476,17 +533,21 @@ def setup_reflection_data(inputs,params,crystal_symmetry,reflection_files,log):
     parameters.labels = params.params.input.reflection_data.labels
   if (params.input.reflection_data.r_free_flags.label is not None):
     parameters.r_free_flags.label = params.input.reflection_data.r_free_flags.label
-  determined_data_and_flags = mmtbx.utils.determine_data_and_flags(
-    reflection_file_server = rfs,
-    parameters             = parameters,
-    keep_going             = True,
-    log                    = StringIO())
-  f_obs = determined_data_and_flags.f_obs
+  try:
+    determined_data_and_flags = mmtbx.utils.determine_data_and_flags(
+      reflection_file_server = rfs,
+      parameters             = parameters,
+      keep_going             = True,
+      log                    = StringIO())
+    f_obs = determined_data_and_flags.f_obs
+    r_free_flags = determined_data_and_flags.r_free_flags
+  except:
+    print "DATA PROCESSING ERROR --> picking first miller array"
+    f_obs = rfs.miller_arrays[0]
   if (params.input.reflection_data.labels is None):
     params.input.reflection_data.labels = f_obs.info().label_string()
   if (params.input.reflection_data.reflection_file_name is None):
     params.input.reflection_data.reflection_file_name = parameters.file_name
-  r_free_flags = determined_data_and_flags.r_free_flags
   assert f_obs is not None
   print >> log, "_"*79
   print >> log,  "Input data:"
@@ -495,14 +556,15 @@ def setup_reflection_data(inputs,params,crystal_symmetry,reflection_files,log):
     print >> log, "  Free-R flags:", r_free_flags.info().labels
     params.input.reflection_data.r_free_flags.label = r_free_flags.info().label_string()
   else:
-    print >> log, "  Free-R flags: Not present"
+    print >> log, "  Free-R flags Not present, generating ..."
+    r_free_flags = f_obs.generate_r_free_flags(fraction=0.05, max_free=1000)
   # Merge anomalous if needed
   if (f_obs.anomalous_flag()):
     sel = f_obs.data()>0
     f_obs = f_obs.select(sel)
-    r_free_flags = r_free_flags.select(sel)
     merged = f_obs.as_non_anomalous_array().merge_equivalents()
     f_obs = merged.array().set_observation_type(f_obs)
+    r_free_flags = r_free_flags.select(sel)
     merged = r_free_flags.as_non_anomalous_array().merge_equivalents()
     r_free_flags = merged.array().set_observation_type(r_free_flags)
     f_obs, r_free_flags = f_obs.common_sets(r_free_flags)
@@ -513,9 +575,7 @@ def setup_reflection_data(inputs,params,crystal_symmetry,reflection_files,log):
     print >> log, "    -->Override with \"score_res=XXX\""
   return f_obs,r_free_flags
 
-def create_strip_pdb(pdb_hier,pdb_xrs,omit_mode,log):
-  print >> log, "_"*79
-  print >> log, "Creating PDB stripped of selected solvent species:"
+def split_mac_sol(pdb_hier,pdb_xrs,omit_mode,log):
   #modify pdb structure with selected solvent omits
   input_hier = pdb_hier
   input_xrs = pdb_xrs
@@ -525,7 +585,7 @@ def create_strip_pdb(pdb_hier,pdb_xrs,omit_mode,log):
       #other water names, TIP etc?
       omit_sel_str = 'resname HOH or resname SO4 or resname PO4'
       print >> log, "  Omitting SO4/PO4 and HOH from model"
-    if omit_mode == 'omitsol':
+    if omit_mode == 'omitsol' or omit_mode == 'valsol':
       to_omit = ('HOH','SO4','PO4','HED','LDA','AZI','NH4','ACP','DTT','THP','MAL','NAI','BEN','AKG',
                  'EOH','POP','SUC','RET','GLC','F3S','PLM','NCO','BGC','NDG','CAC','MLI','SCN',
                  'MAN','P6G','GSH','CO3','TLA','SAM','GNP','HEC','FLC','UNL','MRD','CIT','BOG',
@@ -534,12 +594,31 @@ def create_strip_pdb(pdb_hier,pdb_xrs,omit_mode,log):
       omit_sel_str = "resname "+" or resname ".join(to_omit).format(['"{:3s}"'*len(to_omit)])
       print >> log, "  Omitting %d common solvent molecules (e.g. HOH,SO4,CIT,BME,EDO,...)" % len(to_omit)
     omit_selection = atom_selection_manager.selection(string = omit_sel_str)
-    keep_selection = ~omit_selection
-    n_selected = omit_selection.count(True)
-    print >> log, "     Omitted %d atoms total)" % n_selected
-    strip_xrs = input_xrs.select(selection = keep_selection)
-    strip_hier = input_hier.select(keep_selection)
-  return strip_xrs,strip_hier
+    return omit_selection
+
+
+
+def create_strip_pdb(pdb_hier,pdb_xrs,omit_mode,log):
+  print >> log, "_"*79
+  print >> log, "Creating PDB stripped of selected solvent species:"
+  #modify pdb structure with selected solvent omits
+  if(omit_mode is not 'asis'):
+    omit_selection = split_mac_sol(pdb_hier,pdb_xrs,omit_mode,log)
+    strip_selection = ~omit_selection
+    n_selected = strip_selection.count(True)
+    print >> log, "     Omitted %d atoms total" % n_selected
+    strip_xrs = pdb_xrs.select(selection = strip_selection)
+    strip_hier = pdb_hier.select(strip_selection)
+    return strip_xrs,strip_hier
+
+def create_sol_pdb(pdb_hier,pdb_xrs,omit_mode,log):
+  sol_sel = split_mac_sol(pdb_hier,pdb_xrs,omit_mode,log)
+  n_selected = sol_sel.count(True)
+  print >> log, "     Output %d solvent atoms total" % n_selected
+  sol_xrs = pdb_xrs.select(selection = sol_sel)
+  sol_hier = pdb_hier.select(sol_sel)
+  return sol_xrs,sol_hier
+
 
 def create_pprobe_maps(f_obs,r_free_flags,params,strip_xrs,strip_hier,log):
   print >> log, "_"*79
