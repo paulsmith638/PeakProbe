@@ -132,7 +132,7 @@ class PhenixTasks:
         #creates master peak dictionary indexed by unique identifier "unal"
         peak_unal_db = {}
         #null peak for later analysis and storing program parameters,inputs,etc.
-        null_peak_dict['info'] = {"param":self.phe_par,"cmdline":self.cmdline,"symmetry":symmetry}
+        null_peak_dict['info'] = {"param":self.phe_par,"symmetry":symmetry,"omit_mode":self.omit_mode}
         null_peak_dict['inputs'] = {"ori_hier":orig_pdb_hier}
         peak_unal_db[null_peak_dict['unal']] = null_peak_dict
         for plist in [input_peak_list,omit_peak_list,sol_peak_list]:
@@ -218,7 +218,7 @@ class PhenixTasks:
         pdict['omit'] = 0 #boolean, omit if "1", for training/cv
 
         #process contacts for all peaks
-        ppcont.process_contacts(pdict)
+        ppcont.process_contacts(pdict,self.omit_mode)
 
         #stop here if peak does not have omit data (maps,etc)
         if not full_proc:
@@ -271,7 +271,7 @@ class PProbeTasks:
         ppfilt = PPfilt(verbose=False)
         #score by 2D histogram matching
 
-        self.kde_score(data_array)
+        self.kde_score(data_array,all_peak_db)
         #reassign flags based on histogram derived probabilities
         data_array['rc'] = ppclass.score_flags(data_array)
         sig_flags = ppfilt.cutoff_rejects(data_array,data_array.dtype.names)
@@ -375,7 +375,8 @@ class PProbeTasks:
         #for pdict in all_peak_db.values():
         #    if pdict['status'] not in [1,3,6,7] and pdict['model'] in [3,4]:
         #        ppclas.peak_summary(pdict)
-    def kde_score(self,master_array):
+
+    def kde_score(self,master_array,all_peak_db):
         #master_array = np.sort(master_array,order=['id'])
         ppio = PPio()
         pput = PPutil()
@@ -384,8 +385,13 @@ class PProbeTasks:
         kde_probs = ppkde.kde_score(master_array)
         master_array['kde'] = kde_probs
         master_array['lab'] = ppkde.kde_label(master_array)
-        for pind,probs in enumerate(kde_probs):
-            master_array['pick'][pind] = pput.pick_from_prob(probs)
+        for pind,drow in enumerate(master_array):
+            unal = drow['unal']
+            pdict = all_peak_db[unal]
+            pick = pdict['pick']
+            if pick == 0:
+                pick = pput.pick_from_prob(drow['kde'])
+            master_array['pick'][pind] = pick
 
     def train_model(self,master_array,master_dictionary,tplot=True,train_steps=None,write_data=False,output_root="train"):
         from PProbe_train import TrainingFunctions as PPtrain

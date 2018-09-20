@@ -50,20 +50,6 @@ class Output:
 
     def initialize_lists(self,all_peak_db,valsol=False):
 
-
-        #if valsol: #peaks are models, make copies
-        #    pu_list = list(pdict['unal'] for pdict in all_peak_db.values() if pdict['model'] == 4)
-        #    for sind,unal in enumerate(pu_list):
-        #        pdict = all_peak_db[unal]
-        #        new_unal = hash("SOL"+str(unal))
-        #        all_peak_db[new_unal] = {k:v for k,v in pdict.iteritems()}  
-        #        sdict = all_peak_db[new_unal]
-        #        sdict['model'] == 3
-        #        sdict['mod_for'] = [(unal,0.0),]
-        #        pdict['sol_mod'] = [(new_unal,0.0),]
-  
-
-
         # start with null null peak
         # included so refs to index 0 point to null
         null_peak = all_peak_db[-8861610501908601326]
@@ -117,6 +103,9 @@ class Output:
                     if n_mod > 0:
                         urow['mod'] = n_mod
                         urow['modi'] = mod_soli[0]
+                if valsol: #models are self
+                    urow['mod'] = 1
+                    urow['mlab'] = pdict['label']
             elif urow['model'] == 3:
                 urow['proc'] = pdict['status'] not in [1,3,6,7]
                 claimed_by_i = list(np.nonzero(self.pm_mat[uind]>=0.0)[0])
@@ -143,6 +132,7 @@ class Output:
             tmp_groups.append(tuple(sorted(list(np.nonzero(self.link_mat[pi] > 0)[0]))))
         tmp_groups = list(set(tmp_groups)) #uniquify
         tmp_groups.sort(key = lambda ilist: len(ilist), reverse=True)
+        tmp_groups = self.uniq_groups(None,explicit_lists=tmp_groups)
         group_dict = {}
         for gi,group in enumerate(tmp_groups):
             if len(group) > 1:
@@ -166,7 +156,8 @@ class Output:
         grouped_unproc = self.merge_masks([self.restab['mfl']>1,self.restab['proc']==0])
         self.get_group_mats()
         self.restab['grank'][grouped_unproc] = 9
-        self.match_modsol()
+        if not valsol:
+            self.match_modsol()
         #self.propagate_modparam()
         self.initialized = True
 
@@ -412,10 +403,6 @@ class Output:
                     if pi != pi2:
                         system_mat[pi,pi2] = sm
 
-        print "INGROUP",ingroup_mat.shape
-        print ingroup_mat[0:50,0:50].astype(np.int)
-        print "SYSTEM",system_mat.shape
-        print system_mat[0:50,0:50].astype(np.int)
         for pind,system in enumerate(system_mat):
             peaks = list(np.nonzero(system==4)[0])
             solmod = list(np.nonzero(system==3)[0])
@@ -423,7 +410,7 @@ class Output:
             spicks = " ".join(list(str(rt['pick'][si]) for si in solmod))
             pstr = " ".join(list(self.i2r(x) for x in peaks))
             sstr = " ".join(list(self.i2r(x) for x in solmod)) 
-            print "SYSTEM",len(peaks),len(solmod),system[pind],"||"," || ".join([ppicks,spicks,pstr,sstr])
+            #print "SYSTEM",len(peaks),len(solmod),system[pind],"||"," || ".join([ppicks,spicks,pstr,sstr])
             
         self.ingroup_mat = ingroup_mat
         self.system_mat = system_mat
@@ -621,7 +608,9 @@ class Output:
             if rt['proc'][pi] > 0:
                 pick = rt['pick'][pi]
                 qual = rt['qual'][pi]
-                clust_votes[pick] = clust_votes[pick] + qual + 1
+                not_metal = pick != 4
+                #cluster elections never pick metal correctly
+                clust_votes[pick] = clust_votes[pick] + qual*not_metal + 1 
         p_win = np.argmax(clust_votes)
         ranks = self.explicit_rank(all_peak_db,ilist,forpick=p_win)
         ranks_as_w = self.explicit_rank(all_peak_db,ilist,forpick=1)
@@ -639,7 +628,7 @@ class Output:
         rt =self.restab
         g_ilist = np.array(list(self.u2i[punal] for punal in g_ulist))
         is_proc = np.array(list(rt['proc'][si] == 1 for si in g_ilist))
-        score_arr = np.zeros(len(g_ilist))
+        score_arr = np.zeros(len(g_ilist))  
         ranks = np.zeros(len(g_ilist),dtype=np.int16)
         if np.count_nonzero(is_proc) == 0:
             return ranks
@@ -912,7 +901,7 @@ class Output:
                 print "CLUST_CULL1",list(self.i2r(pi) for pi in alli)
                 continue
             checki = list(np.nonzero(tocheck)[0])
-            all_ranks = self.explicit_rank(all_peak_db,checki)
+            all_ranks = self.explicit_rank(all_peak_db,checki)  
             ranked_i = list(rank[1] for rank in all_ranks)
             ranked_picks = list(rank[2] for rank in all_ranks)
             culled_ranks = list(rank for rank in all_ranks if (rank[3]> 0.0 and rank[2] > 0)) #only good scores
@@ -938,7 +927,7 @@ class Output:
                                                "||"," ".join(str(x) for x in culled_picks),"||",
                                                " ".join(list("%4.2f" % scr for scr in culled_scores)),
                                                "||"," ".join(list("%13s" % self.i2r(pi) for pi in ranked_i))])
-            if len(culled_picks) == 1:
+            if len(culled_picks) == 1: #usually very wrong, rescore on entire cluster
                 clust_type = culled_picks[0]
                 clust_lists[clust_type].append(alli)
                 print "CLUST_MATCH0",outstr
@@ -977,7 +966,7 @@ class Output:
                     #else use election with quality to pick winner, matches label ~90% 
                     if clust_type == 0:
                         clust_type = elect
-                        clust_lists[clust_type].append(alli)
+                        clust_lists[clust_type].append(alli)  
                         print "CLUST_ELECT1",outstr
             else:#  lousy cluster, no positive scores
                 clust_lists[0].append(alli)
@@ -1310,9 +1299,10 @@ class Output:
             rc = pdict['rc']
             pnw = pdict['prob']
             fc = pdict['fc']
+            den = pdict['2fofc_sigo_scaled']
             #if not modelled as SO4 already, check all flags
             if rt['model'][pi] == 4 or (rt['model'][pi] == 3 and rt['mlab'][pi] != 2):
-                if edc > 0 and cc > 0 and rc > 0 and  rc < 4 and edc + cc < 10 and pnw > 0.9 and fc in [0,1]:
+                if edc > 0 and cc > 0 and rc > 0 and abs(edc-cc) < 3 and edc + cc < 10 and pnw > 0.9 and fc in [0,1]:
                     rt['fmk'][pi] = 2
                 else:
                     rt['fmk'][pi] = -2
@@ -1337,6 +1327,7 @@ class Output:
             rc = pdict['rc']
             pnw = pdict['prob']
             fc = pdict['fc']
+            den = pdict['2fofc_sigo_scaled']
             #if adding a new OTH, stringent quality
             if rt['istat'][pi] == 53:
                 if rt['qual'][pi] < 5:
@@ -1345,7 +1336,7 @@ class Output:
             if rt['mlab'][pi] in [1,2,4]:
                 if rt['qual'][pi] < 5:
                     valid_oth = False
-            if edc not in [4,5] and  pnw > 0.5 and fc in [0,1,5]:
+            if edc not in [4,5] and  pnw > 0.5 and fc in [0,1,5] and valid_oth:
                 rt['fmk'][pi] = 3
             else:
                 rt['fmk'][pi] = -3
@@ -1461,23 +1452,31 @@ class Output:
 
 
 
-    def uniq_groups(self,glist):
+    def uniq_groups(self,glist,explicit_lists=None):
         #uniquify groups/clusters
         #takes by group number, returns 
-        unique_clists = []
-        for group in glist:
-            gsel = self.ingroup_mat[group]
-            groupi = list(np.nonzero(gsel)[0])
-            #sorted tuples hashable
-            unique_clists.append(tuple(sorted(groupi)))
-        unique_clists = list(set(unique_clists))
+        if explicit_lists is None:
+            unique_clists = []
+            for group in glist:
+                gsel = self.ingroup_mat[group]
+                groupi = list(np.nonzero(gsel)[0])
+                #sorted tuples hashable
+                unique_clists.append(tuple(sorted(groupi)))
+            unique_clists = list(set(unique_clists))
+        else:
+            unique_clists = explicit_lists
         #on occasion, peaks end up in multiple groups (eg: if linked by multi atom solvent)
         #keep in longest list, remove from rest
         unique_clists.sort(key = lambda clist: len(clist),reverse=True)
+        placed_i = []
+        new_clists = []
+        for clist in unique_clists:
+            unplaced = list(pi for pi in clist if pi not in placed_i)
+            placed_i.extend(unplaced)
+            new_clists.append(unplaced)
+        new_clists.sort(key = lambda clist: len(clist),reverse=True)
+        unique_clists = list(clist for clist in new_clists if len(clist) > 0)
         return unique_clists
-
-
-
 
 
     def split_resolve(self,all_peak_db):
@@ -2346,6 +2345,8 @@ class Output:
         cnz = np.count_nonzero
 
         null_peak = all_peak_db[-8861610501908601326]
+        omit_mode = null_peak['info']['omit_mode']
+
         peaks = rt['model'] == 4
         mods = rt['model'] == 3
         mp_out = rt['fmk'] > 0
@@ -2353,9 +2354,21 @@ class Output:
         mp_match = np.logical_and(rt['pick'] > 0,np.equal(rt['pick'],rt['mpick']))
         new_peaks = self.merge_masks([peaks,rt['mod'] == 0,mp_out])
         killed = np.invert(mp_out)
+        killed_peaks = self.merge_masks([peaks,killed])
         paired = np.logical_or(np.logical_and(peaks,rt['modi']>0),np.logical_and(mods,rt['peaki']>0))
         unpaired = np.logical_or(np.logical_and(peaks,rt['modi']==0),np.logical_and(mods,rt['peaki']==0))
-        unique_in = self.merge_masks([rt['grank']==0,rt['grank']==1,rt['mlab']>0,mods],opp='uii')
+        if omit_mode == 'valsol':
+            ngroups = np.amax(rt['group'])
+            unique_in = np.zeros(rt.shape[0],dtype=np.bool_)
+            for groupn in np.arange(1,ngroups):
+                gsel = rt['group'] == groupn
+                tomark = np.nonzero(gsel)[0][0]
+                unique_in[tomark] = True
+            unique_in[rt['mlab']==1] = True
+            unique_in[rt['model'] != 4] = False
+        else:
+            unique_in = self.merge_masks([rt['grank']==0,rt['grank']==1,rt['mlab']>0,mods],opp='uii')
+        mod_groups = list(set(list(rt['group'][mods])))
         pop_in = list(np.logical_and(rt['mlab'] == x,unique_in) for x in [1,2,3,4])
         pop_sel = list(rt['fmk'] == x for x in [1,2,3,4])
         res_names = ["HOH","SO4","OTH","ML1"]
@@ -2365,13 +2378,13 @@ class Output:
         pwm_mismatch =  self.merge_masks([pout_with_mod,np.invert(lab_match)])
         mout_with_mod = self.merge_masks([mods,paired,mp_out])
         mod_uncl_out =  self.merge_masks([mods,mp_out,unpaired])
-        mod_groups = list(set(list(rt['group'][mods])))
         cond_md_all = np.zeros(rt.shape[0],dtype=np.bool_)
         cond_md_pair = np.zeros(rt.shape[0],dtype=np.bool_)
         cond_md_unpair = np.zeros(rt.shape[0],dtype=np.bool_)
         cond_mout_all = np.zeros(rt.shape[0],dtype=np.bool_)
         cond_mout_pair = np.zeros(rt.shape[0],dtype=np.bool_)
         cond_mout_unpair = np.zeros(rt.shape[0],dtype=np.bool_)
+        reject_byres = np.zeros(rt.shape[0],dtype=np.bool_)
         for group in mod_groups:
             gsel = rt['group'] == group
             gmark = self.merge_masks([rt['grank']==0,rt['grank']==1,gsel],opp='ui')
@@ -2393,14 +2406,14 @@ class Output:
         #TAB     POP  ACTION/DESC                  TOTAL              HOH  SO4  OTH  ML1
         str01 = "PProbe RUN at  %s" % time.ctime()
         str02 = "PEAK/MODEL INFORMATION:"
-        str03 = "Peaks Input                          TOTAL               HOH  SO4  OTH  ML1:"
+        str03 = "Peaks Input (by atom)               TOTAL                HOH  SO4  OTH  ML1:"
         str04 = "--Total                        --> %5s                   " % cnz(peaks)
         str05 = "--Built                        --> %5s                %s " % (cnz(np.logical_and(peaks,mp_out)),pop_insel(peaks,rt['fmk']))
         str06 = "----New/Added                  --> %5s                %s " % (cnz(new_peaks),pop_insel(new_peaks,rt['fmk']))
         str07 = "----With Model                 --> %5s                %s " % (cnz(pout_with_mod),pop_insel(pout_with_mod,rt['fmk']))
         str08 = "--------Agree with Mod Label   --> %5s                %s " % (cnz(pwm_labmatch),pop_insel(pwm_labmatch,rt['fmk']))
         str09 = "--------Disagree with Label    --> %5s                %s " % (cnz(pwm_mismatch),pop_insel(pwm_mismatch,rt['fmk']))
-        str10 = "--Rejected                     --> %5s                   " % cnz(np.logical_and(peaks,killed))
+        str10 = "--Rejected                     --> %5s                   " % cnz(killed_peaks)
         str11 = ""
         str12 = ""
         str13 = "Models Input (by residue):"

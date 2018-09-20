@@ -623,7 +623,7 @@ class Contacts:
                         peakc.append(contact)
             return local,strip,peakc
 
-      def process_contacts(self,pdict,write_contacts=False):
+      def process_contacts(self,pdict,omit_mode,write_contacts=False):
             ppio = DataIO()
             p_unal = pdict['unal']
             p_unat = pdict['unat']
@@ -658,6 +658,8 @@ class Contacts:
                         pdict['orires'] = all_ori_cont[0]['resname']
                   else:
                         pdict['orires'] = 'XXX' #nothing close
+                  if omit_mode == "valsol":
+                        pdict['orires'] = pdict['resat'].split("_")[0]
             elif pdict['model'] == 3:
                   pdict['orires'] = pdict['resat'].split("_")[0]
                   if pdict['orires'] == 'HOH':
