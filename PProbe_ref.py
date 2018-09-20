@@ -56,7 +56,9 @@ class RSRefinements:
         input_xrs = copy.deepcopy(pdb_xrs)
         input_hier = copy.deepcopy(pdb_hier)
         try:
-            ref_out = rsr.easy(map_data,input_xrs,input_hier,restraints,w=None,max_iterations=100)
+            #weight of 5.0 allows good movement into density 
+            #speeds up by skipping weight calculation
+            ref_out = rsr.easy(map_data,input_xrs,input_hier,restraints,w=5.0,max_iterations=100)
             ref_xrs = ref_out.xray_structure
             ref_hier = ref_out.pdb_hierarchy
         except:

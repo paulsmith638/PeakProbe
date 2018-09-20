@@ -1,5 +1,5 @@
 from __future__ import division
-import sys,re,copy,os,ast
+import sys,re,copy,os,ast,time
 import numpy as np
 
 class PhenixTasks:
@@ -50,19 +50,28 @@ class PhenixTasks:
                     self.out_prefix = cmdline[5]
             else:
                 self.out_prefix = 'user'
+            self.phe_par = None
+            self.cmdline = " ".join(par for par in cmdline)
         if phenix_params:
             phil_f = open(phenix_params,'r')
             phil_str = phil_f.read()
             phil_f.close()
             pprobe_phil = phil.parse(phil_str)
             self.phe_par = pprobe_phil.extract()
-            self.model_pdb = self.phe_par.input.pdb.model_pdb[0]
-            self.strip_pdb = self.phe_par.input.pdb.strip_pdb[0]
-            self.peaks_pdb = self.phe_par.input.pdb.peaks_pdb[0]
-            self.map_coeff = self.phe_par.input.input_map.map_coeff_file[0]
-            self.score_res = self.phe_par.input.parameters.score_res[0]
+            extract_asstr = self.phe_par.pprobe.extract[0]
+            extract = extract_asstr[0].lower() == "t"
+            if extract:
+                self.model_pdb = self.phe_par.input.pdb.model_pdb[0]
+                self.strip_pdb = self.phe_par.input.pdb.strip_pdb[0]
+                self.peaks_pdb = self.phe_par.input.pdb.peaks_pdb[0]
+                self.map_coeff = self.phe_par.input.input_map.map_coeff_file[0]
+            mdict_file = self.phe_par.input.model_param.model_dict_file[0]
+            self.master_dict = self.ppio.read_master_dict(input_dfile=mdict_file)
+            scres = self.phe_par.input.parameters.score_res
+            if scres is not None:
+                self.score_res = self.phe_par.input.parameters.score_res[0]
             self.out_prefix  = self.phe_par.output.output_peak_prefix[0][0:4]
-            # I can't figure out this phil parce thing, so bad hack here
+            # I can't figure out this phil parse thing, so bad hack here
             for option in self.phe_par.input.parameters.map_omit_mode:
                 if option[0] == "*":
                     self.omit_mode = option[1::]
@@ -71,53 +80,10 @@ class PhenixTasks:
             fix dev options here
             """
             if self.omit_mode == "valsol":
-                #self.dev_opts['renumber'] = True
                 self.dev_opts['proc_sol'] = False
-            
-    def peak_process(self,pdict,symmetry,orig_pdb_hier,strip_pdb_hier,
-                     peak_pdb_hier,struct_data,ptype='unproc',write_maps=False):
-        ppfeat = self.ppfeat
-        pput = self.pput
-        ppio = self.ppio
-        ppcont = self.ppcont
-        p_unal = pdict['unal']
-        pdict['pdb_code']= self.out_prefix
-        if pdict['model'] in  [1,2]:
-            pdict['status'] = 7
-        else:
-            pdict['status'] = 0
-        pdict['warnings'] = []
-        pdict['ptype'] = ptype
-        pdict['resolution'] = struct_data.resolution
-        pdict['bin'] = struct_data.res_bin
-        pdict['omit'] = 0 #boolean, omit if "1", for training/cv
-
-        #process contacts for all peaks
-        ppcont.process_contacts(pdict)
-
-        #only process peaks that were omitted from map calculations
-        if ptype == 'unproc':
-            pdict['warnings'].append('UNPROC')
-            return
-        peak_object,ref_object = ppfeat.generate_peak_object(pdict,symmetry,orig_pdb_hier,strip_pdb_hier,
-                                                             peak_pdb_hier,struct_data,write_maps=self.dev_opts['write_maps'])
-
-        rsr_object = PPreal(peak_object,ref_object,pdict,pdict['strip_contacts'],ressig=self.dev_opts['ressig'])
-        rsr_object.refinement(pdict,peak_object,ref_object,write_pdb = self.dev_opts['write_ref_pdb'],
-                              outstr=self.dev_opts['pdb_out_str'])
-        rsr_object.ref_contacts()
-        ppcont.parse_contacts(pdict)
-        rsr_object.rotations(peak_object,ref_object,write_pdb=self.dev_opts['write_ref_pdb'])
-        pdict['solc'] = struct_data.solvent_content
-        ppfeat.basic_features(pdict,peak_object)
+            self.cmdline=""
 
 
-        #print "PROCESS ERROR! Peak %s aborted" % pdict['db_id']
-        #return "ERROR"
-
-        #look for clashes and solvent model
-        pdict['clash'] = ppcont.cflag_pass1(pdict)
-        
 
     def feature_extract(self):
         # Master Feature Extraction 
@@ -128,12 +94,13 @@ class PhenixTasks:
         pdb_code = self.out_prefix
 
         #here we go:
-        #read in all data:
 
+        #read in all data/params
         map_file = self.map_coeff
         orig_pdb_obj = iotbx.pdb.input(self.model_pdb)
         strip_pdb_obj = iotbx.pdb.input(self.strip_pdb)
         peak_pdb_obj = iotbx.pdb.input(self.peaks_pdb)
+
         # construct all 3 hierarchies
         orig_pdb_hier = orig_pdb_obj.construct_hierarchy()
         strip_pdb_hier = strip_pdb_obj.construct_hierarchy()
@@ -157,6 +124,7 @@ class PhenixTasks:
         #generates an object that contains complete asu maps and geometry restraints for SO4 and water
         struct_data=PPstruct(pdb_code,symmetry,orig_pdb_hier,strip_pdb_hier,peak_pdb_hier,map_file,self.score_res)
 
+        null_hier = struct_data.gen_null_peak()
         omit_hier = ppcont.omited_peaks(orig_pdb_hier,strip_pdb_hier)
         solvent_hier = ppcont.solvent_peaks(orig_pdb_hier)
         merge_hier = ppcont.merge_hier([strip_pdb_hier,omit_hier,solvent_hier,peak_pdb_hier],symmetry)
@@ -165,22 +133,25 @@ class PhenixTasks:
         input_peak_list = ppfeat.generate_peak_list(pdb_code[0:4],peak_pdb_hier,4,set_chain=self.dev_opts['set_chain'],renumber=self.dev_opts['renumber'])
         omit_peak_list = ppfeat.generate_peak_list("orip",omit_hier,2)
         sol_peak_list = ppfeat.generate_peak_list("solp",solvent_hier,3)
-
+        null_peak_dict = ppfeat.generate_peak_list("null",null_hier,5)[0] #null unal = -8861610501908601326
         natoms = merge_hier.atoms().size()
         print "   Collecting contacts for %d atoms" % natoms
-
         #generates all contacts, very big dictionary of lists
         contact_by_unal = ppcont.peak_allcont(merge_hier,symmetry)
 
-        #creates master peak hash of hashes
+        #creates master peak dictionary indexed by unique identifier "unal"
         peak_unal_db = {}
+        #null peak for later analysis and storing program parameters,inputs,etc.
+        null_peak_dict['info'] = {"param":self.phe_par,"cmdline":self.cmdline,"symmetry":symmetry}
+        null_peak_dict['inputs'] = {"ori_hier":orig_pdb_hier}
+        peak_unal_db[null_peak_dict['unal']] = null_peak_dict
         for plist in [input_peak_list,omit_peak_list,sol_peak_list]:
             for pdict in plist:
                 pdict['peak_unal_db'] = peak_unal_db #keep reference to all peaks in the peak itself
-                pdict['ptype'] = 'generic' #changed later as features are extracted
                 pdict['cont_db'] = contact_by_unal #reference to all contacts
+                pdict['master_dict'] = self.master_dict #reference to paster dictionary
                 peak_unal_db[pdict['unal']] = pdict
-
+        
         omit_unat = list(peak['unat'] for peak in omit_peak_list)
         sol_unat = list(peak['unat'] for peak in sol_peak_list)
         omit_sol_unat = list(set(omit_unat) & set(sol_unat))
@@ -189,6 +160,9 @@ class PhenixTasks:
         added_sol_unat = []
         print "\nExtracting Features from %d Input Peaks: " % len(input_peak_list)        
         print "     peak_id      Density Level (unscaled)           Peak Env           Neighbor Macro       Assc. Solvent"
+
+        #loop through each peak and extract density data
+
         for pdict in input_peak_list:
             p_unal = pdict['unal']
             close_solvent = ppcont.prune_cont(pdict['cont_db'][p_unal],omit_models=[1,2,4],uniquify=True,unires=True,omit_null=True,cutoff=3.5)
@@ -200,10 +174,12 @@ class PhenixTasks:
                         added_sol_unat.append(cont['unat'])
                         cls_count = cls_count + 1
             processed = self.peak_process(pdict,symmetry,orig_pdb_hier,strip_pdb_hier,peak_pdb_hier,struct_data,
-                                          write_maps=self.dev_opts['write_maps'],ptype='peakin')
+                                          write_maps=self.dev_opts['write_maps'])
             if processed == "ERROR":
                 pdict['status'] = 1
                 continue
+            else:
+                pdict['status'] = 0
             outstr = ppio.initial_report(pdict)
             if cls_count > 0:
                 outstr = outstr + " --> added %d close solvent" % cls_count
@@ -213,7 +189,7 @@ class PhenixTasks:
         for p_unal in sol_peaks_toadd:
             pdict = peak_unal_db[p_unal]
             processed = self.peak_process(pdict,symmetry,orig_pdb_hier,strip_pdb_hier,peak_pdb_hier,struct_data,
-                                          write_maps=self.dev_opts['write_maps'],ptype='modsol')
+                                          write_maps=self.dev_opts['write_maps'])
             
             if processed == "ERROR":
                 pdict['status'] = 1
@@ -222,7 +198,7 @@ class PhenixTasks:
         sol_noproc = list(pdict['unal'] for pdict in peak_unal_db.values() if (pdict['model'] == 3 and pdict['unat'] not in added_sol_unat))
         for unal in sol_noproc:
             pdict = peak_unal_db[unal]
-            processed = self.peak_process(pdict,symmetry,orig_pdb_hier,strip_pdb_hier,peak_pdb_hier,struct_data)
+            processed = self.peak_process(pdict,symmetry,orig_pdb_hier,strip_pdb_hier,peak_pdb_hier,struct_data,full_proc=False)
             if processed == "ERROR":
                 pdict['status'] = 1
             else:
@@ -233,6 +209,49 @@ class PhenixTasks:
         print "-"*79
         return peak_unal_db
 
+
+
+
+    def peak_process(self,pdict,symmetry,orig_pdb_hier,strip_pdb_hier,
+                     peak_pdb_hier,struct_data,write_maps=False,full_proc=True):
+        ppfeat = self.ppfeat
+        pput = self.pput
+        ppio = self.ppio
+        ppcont = self.ppcont
+        p_unal = pdict['unal']
+        pdict['pdb_code']= self.out_prefix
+        if pdict['model'] in  [1,2]:
+            pdict['status'] = 7
+        pdict['warnings'] = []
+        pdict['resolution'] = struct_data.resolution
+        pdict['bin'] = struct_data.res_bin
+        pdict['omit'] = 0 #boolean, omit if "1", for training/cv
+
+        #process contacts for all peaks
+        ppcont.process_contacts(pdict)
+
+        #stop here if peak does not have omit data (maps,etc)
+        if not full_proc:
+            return
+
+        peak_object,ref_object = ppfeat.generate_peak_object(pdict,symmetry,orig_pdb_hier,strip_pdb_hier,
+                                                             peak_pdb_hier,struct_data,write_maps=self.dev_opts['write_maps'])
+
+        rsr_object = PPreal(peak_object,ref_object,pdict,pdict['strip_contacts'],ressig=self.dev_opts['ressig'])
+        rsr_object.refinement(pdict,peak_object,ref_object,write_pdb = self.dev_opts['write_ref_pdb'],
+                              outstr=self.dev_opts['pdb_out_str'])
+        rsr_object.ref_contacts()
+        ppcont.parse_contacts(pdict)
+        rsr_object.rotations(peak_object,ref_object,write_pdb=self.dev_opts['write_ref_pdb'])
+        pdict['solc'] = struct_data.solvent_content
+        ppfeat.basic_features(pdict,peak_object)
+
+
+        #look for clashes and solvent model
+        pdict['clash'] = ppcont.cflag_pass1(pdict)
+        
+
+
             
 
 
@@ -240,7 +259,7 @@ class PhenixTasks:
 class PProbeTasks:
     #other tasks that might conflict with phenix (matplotlib, scipy, etc.)
     def __init__(self):
-        global PPclass,PPfilt,PPcont,PPsel,PPtrain,PPutil,PPKDE,PPio
+        global PPclass,PPfilt,PPcont,PPsel,PPtrain,PPutil,PPKDE,PPio,PPout
         from PProbe_classify import ClassifierFunctions as PPclass
         from PProbe_filter import Filters as PPfilt
         from PProbe_contacts import Contacts as PPcont
@@ -248,61 +267,41 @@ class PProbeTasks:
         from PProbe_util import Util as PPutil
         from PProbe_kde import KDE as PPKDE
         from PProbe_dataio import DataIO as PPio
+        from PProbe_output import Output as PPout
 
-    def post_process(self,data_array,peak_feat_list):
+    def post_process(self,all_peak_db,data_array,peak_feat_list):
+        if len(peak_feat_list) == 0:
+            return
         #sig_flags flags outliers by absolute cutoffs, np_array index
         #sat_dict is dict of (id,score) for possible satellite peaks, by db_id
         #prob arrays, labels are np array indexed
         #updates existing dictionary
-        ppcont = PPcont(phenix_python=False)
-        pput = PPutil()
         ppclass = PPclass(verbose=False)
         ppio = PPio()
         ppfilt = PPfilt(verbose=False)
+        #score by 2D histogram matching
 
-        prob_arr,pred_arr,labels,kdedict = self.kde_score(data_array)
-        print "CALCULATING HISTOGRAM LIKELIHOODS FOR %s PEAKS" % prob_arr.shape[0]
-
+        self.kde_score(data_array)
         #reassign flags based on histogram derived probabilities
         data_array['rc'] = ppclass.score_flags(data_array)
         sig_flags = ppfilt.cutoff_rejects(data_array,data_array.dtype.names)
-        n_outliers = np.count_nonzero(sig_flags)
+        sigr_unal = list(data_array[sig_flags]['unal'])
+        n_outliers = len(sigr_unal)
         if n_outliers > 0:
-            print "FLAGGED %s PEAK(S) AS OUTLIERS (Status = 2)" % n_outliers
-        sat_dict = ppfilt.peak_sat(data_array)
+            print "-->FLAGGED %s PEAK(S) AS OUTLIERS (Status = 2)" % n_outliers
+        
+        ppio.update_from_np(all_peak_db,data_array)
+        ppclass.score_peaks(all_peak_db)
+        for pind,pdict in enumerate(peak_feat_list):
 
-        id_lookup = {}
-
-        for pind,peak_dict in enumerate(peak_feat_list):
-            peakid = peak_dict['db_id']
-            unal = peak_dict['unal']
-            arr_ind = np.nonzero(data_array['unal'] == unal)
-            if len(arr_ind) > 1:
-                print "   ERROR!  Duplicate ID in array!",peakid,unal
-                continue
-            else:
-                arr_ind = arr_ind[0][0]
-            peak_dict['proc_data'] = data_array[arr_ind] # processed feature data
-            peak_dict['prob_data'] = prob_arr[arr_ind] #class probabilities
-            peak_dict['pred_data'] = pred_arr[arr_ind] #predictions
-            peak_dict['label'] = labels[arr_ind] #input labels
-            if sig_flags[arr_ind]:
-                peak_dict['status'] = 2
-            peak_dict['resid_names'] = kdedict['populations']
-            #grows list of non-self satellite peaks
-            sat_peaks = []
-            for sat_id,sat_scr in sat_dict[peakid]:
-                if sat_id != peakid:
-                    sat_peaks.append(sat_id)
-            peak_dict['sat_peaks'] = list(set(sat_peaks))
-
-            #remove pointers from dictionary to hierarchies,xrs, etc. (easier to pickle)
+            if pdict['unal'] in sigr_unal:
+                pdict['status'] = 2
+            #remove pointers from dictionary to hierarchies,xrs, etc. (easier/smaller to pickle)
             for key in ["so4_fofc_ref_hier","so4_i2fofc_ref_hier","so4_2fofc_ref_hier","wat_2fofc_shift",
                         "wat_fofc_ref_xrs","so4_in_hier","wat_in_hier","so4_ifofc_ref_hier","wat_fofc_ref_hier",
                         "so4_ifofc_ref_xrs","so4_2fofc_ref_xrs","wat_2fofc_ref_xrs","wat_2fofc_ref_hier",
                         "so4_2fofc_shift","so4_fofc_ref_xrs","so4_i2fofc_ref_xrs"]:
-                peak_dict.pop(key,None)
-
+                pdict.pop(key,None)
 
     def data_process(self,master_array):
         ppclass = PPclass(verbose=False)
@@ -310,7 +309,6 @@ class PProbeTasks:
         ppcont = PPcont(phenix_python=False)
         ppio = PPio()
         mdict = ppio.read_master_dict()
-        ppkde = PPKDE(mdict)
         print "PROCESSING FEATURES"
         master_array.sort(order=['res','id'])
         selectors = PPsel(master_array)
@@ -339,66 +337,65 @@ class PProbeTasks:
 
     def validate_peaks(self,all_peak_db):
         # updates peak status from a dictionary of peaks
-        # first pass, status is 0-6
         # then updates status by confirming w and s
         # using these confirmed peaks as anchors when necessary, update contacts
         # rescore until no status changes
         ppclas = PPclass()
         ppcont = PPcont(phenix_python=False)
         ppio = PPio()
-
-        for pdict in all_peak_db.values():
-            if "status" not in pdict.keys():
-                # not processed (model protein peak?)
-                pdict['status'] = 7
-                continue
-            if pdict['status'] > 100 or pdict['status'] in [1,3,6,7]:
-                continue
-            else:
-                pdata = pdict['proc_data']
-                if pdict['ptype'] in ['peakin','modsol'] and pdict['status'] not in [1,2,3,6,7]:
-                    if (pdata['edc'] in [0,4,5] or #suspicious density
-                        pdata['fc'] in [2,3,6] or #bad clash or very weak density
-                        pdata['cc'] in [0,4,5]): #junk peak
-                        pdict['status'] = 4
+        peak_list = list(pdict['unal'] for pdict in all_peak_db.values() if pdict['model'] == 4)
+        sol_list = list(pdict['unal'] for pdict in all_peak_db.values() if pdict['model'] == 3)
+        ppcont.associate_models(all_peak_db,peak_list,sol_list)
+        ppcont.cluster_analysis(all_peak_db)
+        #for pdict in all_peak_db.values():
+        #    if pdict['status'] > 100 or pdict['status'] in [-1,1,3,6,7]:
+        #        continue
+        #    else:
+        #        if pdict['model'] in [3,4] and pdict['status'] not in [-1,1,2,3,6,7]:
+        #            if (pdict['edc'] in [0,4,5] or #suspicious density
+        #                pdict['fc'] in [2,3,6] or #bad clash or very weak density
+        #                pdict['cc'] in [0,4,5]): #junk peak
+        #                pdict['status'] = 4
         converged = False
         iterations = 0
         while not converged:
-            updated_peaks= ppclas.update_anchors(all_peak_db,allow_cross=False)
+            updated_peaks= ppclas.update_anchors(all_peak_db,allow_cross=True)
             iterations = iterations + 1
             if updated_peaks > 0 and iterations < 5:
                 print "Updated status for %s peak(s),rescoring cycle %s . . . " % (updated_peaks,iterations)
-                input_feat = list(pdict  for pdict in all_peak_db.values() if pdict['ptype'] == 'peakin')
+                input_feat = list(pdict  for pdict in all_peak_db.values() if pdict['model'] == 4 and pdict['status'] not in [1,3,6,7])
                 if len(input_feat) > 0:
                     master_array=ppio.extract_raw(input_feat)
                     self.data_process(master_array)
-                    self.post_process(master_array,input_feat)
-                ori_feat = list(pdict  for pdict in all_peak_db.values() if pdict['ptype'] == 'modsol')
+                    self.post_process(all_peak_db,master_array,input_feat)
+                ori_feat = list(pdict  for pdict in all_peak_db.values() if (pdict['model'] == 3 and pdict['status'] not in [1,3,6,7]) )
                 if len(ori_feat) > 0:
                     assp_array=ppio.extract_raw(ori_feat)
                     self.data_process(assp_array)
-                    self.post_process(assp_array,ori_feat)
+                    self.post_process(all_peak_db,assp_array,ori_feat)
                 print "-"*79
             else:
                 converged = True
 
         print "DONE -- UPDATING MODELS AND CONTACTS"
-        ppclas.update_water_models(all_peak_db)
+        ppclas.update_all_models(all_peak_db)
         ppclas.bad_contacts(all_peak_db)
-        ppclas.class_mismatches(all_peak_db)
-    
-
+        ppclas.score_peaks(all_peak_db)
+        ppclas.ws_pass1(all_peak_db)
+        #for pdict in all_peak_db.values():
+        #    if pdict['status'] not in [1,3,6,7] and pdict['model'] in [3,4]:
+        #        ppclas.peak_summary(pdict)
     def kde_score(self,master_array):
         #master_array = np.sort(master_array,order=['id'])
         ppio = PPio()
+        pput = PPutil()
         mdict = ppio.read_master_dict()
         ppkde = PPKDE(mdict,verbose=True)
-        prob_arr = ppkde.kde_score(master_array)
-        pred_arr = ppkde.predict_kde(prob_arr)
-        labels = ppkde.kde_label(master_array)
-        kdedict = ppkde.kdedict
-        return prob_arr,pred_arr,labels,kdedict
-        
+        kde_probs = ppkde.kde_score(master_array)
+        master_array['kde'] = kde_probs
+        master_array['lab'] = ppkde.kde_label(master_array)
+        for pind,probs in enumerate(kde_probs):
+            master_array['pick'][pind] = pput.pick_from_prob(probs)
 
     def train_model(self,master_array,master_dictionary,tplot=True,train_steps=None,write_data=False,output_root="train"):
         from PProbe_train import TrainingFunctions as PPtrain
@@ -475,96 +472,34 @@ class PProbeTasks:
         ppio.write_master_dict(master_dictionary)
 
 
-    def data_vs_hist(self,master_array,outstr="test"):
+    def data_vs_hist(self,master_array,gen_prior=False,outstr="test"):
         ppio = PPio()
         mdict = ppio.read_master_dict()
         ppkde = PPKDE(mdict)
         d1 = master_array['score']
         d2 = master_array['cscore']
-        labels=ppkde.kde_label(master_array)
-        ppkde.plot_data_on_grid(d1,d2,labels,outstr=outstr)
+        to_plot = np.invert(master_array['mf'] % 100 > 19)
+        if gen_prior:
+            probin = master_array['kde'][:,2,:]
+            prior,counts = ppkde.calc_pdb_prior(master_array,probin)
+            labels = master_array['lab']
+        else:
+            labels = ppkde.kde_label(master_array)
+            prior=None
+        ppkde.plot_data_on_grid(d1[to_plot],d2[to_plot],labels[to_plot],prior=prior,outstr=outstr)
 
 
-    def output_solmodel(self,master_data,peak_list,fileout="solmod"):
-        #requires input of single PDB of master data
-        pput = PPutil()
-        chain_dict={1:'A',2:'B',3:'C',4:'D',5:'E',6:'F',7:'G',8:'H',9:'I'}
-        res_dict={'A':'SO4','B':'SO4','C':'PO4','D':'SD','E':'HOH','F':'HOH','G':'W3','H':'REJ','I':'OTH'}
-        pdb_txt = ""
-        psort_dict = {'A':[],'B':[],'C':[],'D':[],'E':[],'F':[],'G':[],'H':[],'I':[]}
-        coord_dict={}
-        feature_hash = {}
-        for index,peak in enumerate(peak_list):
-            feature_hash[peak['db_id']] = index
-            coord_dict[peak['db_id']] = peak['coord']
-        for peak in master_data:
-            pfeat = peak_list[feature_hash[peak['id']]]
-            btoc = chain_dict[peak['batch']]
-            psort_dict[btoc].append((peak['id'],coord_dict[peak['id']]))
-        build_s = "" 
-        for chain in ('A','B'):
-            for sindex,peak in enumerate(psort_dict[chain]):
-                s_atom_list = []
-                pfeat = peak_list[feature_hash[peak[0]]]
-                refs_hier = pfeat['so4_2fofc_shift']
-                for atom in refs_hier.atoms():
-                    serial = sindex*5 + len(s_atom_list) + 1
-                    awl = atom.fetch_labels()
-                    name = awl.name.strip()
-                    alt = ""
-                    resname = 'SO4'
-                    resid = sindex+1
-                    ins = ""
-                    x,y,z = atom.xyz
-                    occ = 1.0
-                    temp = 35.0
-                    element = awl.element.strip()
-                    charge = ""
-                    chain = chain
-                    build_s = build_s+pput.write_atom(serial,name,alt,resname,chain,resid,ins,x,y,z,occ,temp,element,charge)
-
-        build_w = ""
-        for chain in ('E','F'):
-            for windex,peak in enumerate(psort_dict[chain]):
-                w_atom_list = []
-                pfeat = peak_list[feature_hash[peak[0]]]
-                refs_hier = pfeat['wat_2fofc_shift']
-                serial = windex+1
-                atom=refs_hier.atoms()[0]
-                awl = atom.fetch_labels()
-                name = awl.name.strip()
-                alt = ""
-                resname = 'HOH'
-                resid = windex+1
-                ins = ""
-                x,y,z = atom.xyz
-                occ = 1.0
-                temp = 35.0
-                element = awl.element.strip()
-                charge = ""
-                chain = chain
-                build_w = build_w+pput.write_atom(serial,name,alt,resname,chain,resid,ins,x,y,z,occ,temp,element,charge)
-
-        """
-        for chain,pclist in psort_dict.iteritems():
-            for peak in pclist:
-                serial = int(peak[0][7:12])
-                name = "O"
-                alt = ""
-                resname = res_dict[chain]
-                resid = serial
-                ins = ""
-                x,y,z = peak[1]
-                occ = 1.0
-                temp = 35.0
-                element = "O"
-                charge = ""
-                pdb_txt= pdb_txt+pput.write_atom(serial,name,alt,resname,chain,resid,ins,x,y,z,occ,temp,element,charge)
-        """
-        fout = open(fileout+"_pprobe.pdb",'w')
-        print >> fout,build_s,build_w
-        fout.close()
-
-    def scr(self,data_array):
-        ppclass = PPclass(verbose=True)
-        ppclass.score_flags(data_array)
+    def peak_report(self,all_peak_db,output_list = None,omit_models=[]):
+        ppio = PPio()
+        if output_list is None: #output every GD peak
+            output_list = list(pdict['unal'] for pdict in all_peak_db.values() if pdict['model'] not in omit_models)
+        else:
+            output_list = list(unal for unal in output_list if all_peak_db[unal]['model'] not in omit_models)
+        output_list = sorted(output_list,key = lambda unal: all_peak_db[unal]['resat'])
+        print "-"*79
+        print "-"*79
+        print "OUTPUT REPORT for %d PEAKS:" % len(output_list)
+        for unal in output_list:
+            ppio.peak_report(all_peak_db,unal)
+            print "-"*79
+            

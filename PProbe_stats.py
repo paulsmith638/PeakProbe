@@ -135,3 +135,14 @@ class StatFunc:
             values.append(cdfsum)
         return np.clip(np.array(values),0.0,1.0)
 
+    def cmatrix(self,label,pred,npop=4):
+        #confusion matrix for scoring
+        #expects integer >= 1 for label/pred
+        max_all = npop+1
+        cmatrix = np.zeros((max_all,max_all),dtype=np.int32)
+        for i in np.arange(1,max_all,1):
+            for j in np.arange(1,max_all,1):
+                cmatrix[i,j] = np.count_nonzero(np.logical_and(label==i,pred==j))
+        cmatrix[:,0] = np.nansum(cmatrix,axis=1)
+        cmatrix[0,:] = np.nansum(cmatrix,axis=0)
+        return cmatrix

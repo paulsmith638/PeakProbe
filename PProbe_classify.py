@@ -10,6 +10,7 @@ from PProbe_matrix import PCA
 from PProbe_dataio import DataIO
 from PProbe_filter import Filters
 from PProbe_contacts import Contacts
+from PProbe_util import Util
 #for plotting
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -25,7 +26,9 @@ class ClassifierFunctions:
           self.ppstat = StatFunc()
           self.pppca = PCA()
           self.ppio = DataIO()
+          self.pput = Util()
           self.ppcont = Contacts()
+          self.ppfilt = Filters(verbose=verbose)
           self.johnsonsu_stats = self.ppstat.johnsonsu_stats
           self.johnsonsu_pdf = self.ppstat.johnsonsu_pdf
           self.norm_pdf = self.ppstat.norm_pdf
@@ -268,7 +271,7 @@ class ClassifierFunctions:
           if self.verbose:
                print "SCORING %s PEAKS ON DENSITY FEATURES" % data_array.shape[0]
           selectors = Selectors(master_array)
-          pput = Util()
+          pput = self.pput
           if self.jsu_coeffs is None:
                sys.exit("NO JSU COEFFICIENTS, ERROR!")
           #can use large amounts of memory, break into sub arrays if necessary
@@ -672,28 +675,30 @@ class ClassifierFunctions:
                plt.close()
 
                    
-     def peak_plot(self,peak_data):
-          plt.switch_backend('WX')
-          resolution = peak_data['res']
-
-          db_id = peak_data['id']
-          pca_view_col = ['RX0','RX1','RX2','RX3','RX4','RX5',
-                          'RX6','RX7','RX8','RX9','RX10','RX11',
-                          'RX12','RX13','RX14','RX15','RX16','RX17','RX18']
-          seldata = np.array(peak_data.reshape(-1)[pca_view_col])
-          gridplot = plt.figure(figsize=(24,8))  
-          xdata=np.linspace(-5,5,200)
-          for index,column in enumerate(pca_view_col):
-               sub = gridplot.add_subplot(4,5,index+1)
-               data_point = seldata[column]
-               sub.plot((data_point,data_point),(0.0,1.0),'k-')
-               sfit,wfit = self.get_jsu_coeffs(index,resolution)
-               sub.plot(xdata,self.johnsonsu_pdf(xdata,sfit[0],sfit[1],sfit[2],sfit[3]),'r-')
-               sub.plot(xdata,self.johnsonsu_pdf(xdata,wfit[0],wfit[1],wfit[2],wfit[3]),'b-')
-          #plt.show()
-          plt.savefig("POINT_FIT_"+db_id+".png")
-          plt.clf()
-          plt.close()
+     def peak_summary(self,pdict):
+          #checks for outliers (5sig) for scoring features
+          resolution = pdict['resolution']
+          col_list1 = list(col for col in self.ppsel(raw_data=None).std_view_col)
+          col_list2 = ['c1','charge']
+          coeff_dict = self.contact_coeffs
+          rev_lookup = {}
+          for pdk,npc in self.ppio.pdict_to_numpy.iteritems():
+               rev_lookup[npc] = pdk
+          outstr = []
+          for index,column in enumerate(col_list1):
+               resd_mean,resd_sig = self.get_res_scales(column,resolution)
+               pd_data = pdict[rev_lookup[column]]
+               pd_z = (pd_data - resd_mean)/np.exp(resd_sig)
+               if np.abs(pd_z) >= 5.0:
+                    outstr.append("PDATA OUTLIER: %12s %13s Column %12s Z= %5.2f" % (pdict['db_id'],pdict['resat'],column,pd_z))
+          for index,column in enumerate(col_list2):
+               pd_data = pdict[rev_lookup[column]]
+               pd_z = np.divide(np.subtract(pd_data,coeff_dict['mean_'+column]),coeff_dict['std_'+column])
+               if np.abs(pd_z) >= 5.0:
+                    outstr.append("PDATA OUTLIER: %12s %13s Column %12s Z= %5.2f" % (pdict['db_id'],pdict['resat'],column,pd_z))
+          if len(outstr) > 0:
+               for str in outstr:
+                    print str
 
 
      def peak_edc(self,results_array):
@@ -701,51 +706,62 @@ class ClassifierFunctions:
           #1-8, 1=best s, 8=best water
           #cutoffs for "good" values for llg and chisq (empirical)
           #cutoffs for score/chi S/W
-          gss_cut = -3.0 #good
-          xss_cut = 3.0  #great
+          gss_cut = -1.0 #good
+          xss_cut = 1.0  #great
           gsc_cut = 35
-          gws_cut = -1.0
-          xws_cut = 1.0
+          gws_cut = -0.5
+          xws_cut = -1.5
           gwc_cut = 35
-    
+          s2f_cut = 4.0
+          w2f_cut = 2.0
+          #note, as of 07012017 draft, scores are res scaled, llg values are not
+
           preds = results_array['score'] > 0.0
-          goods_ss = results_array['llgS'] > gss_cut
-          greats_ss = results_array['llgS'] > xss_cut
+          goods_ss = results_array['score'] > gss_cut
+          greats_ss = results_array['score'] > xss_cut
           goods_sc = results_array['chiS'] < gsc_cut
+          goods_den = results_array['2fofc_sigo'] > s2f_cut
           ps_gs = np.logical_and(preds,goods_ss)
           ps_xs = np.logical_and(preds,greats_ss)
           ps_gc = np.logical_and(preds,goods_sc)
-          
+          ps_gd = np.logical_and(preds,goods_den)
+
           predw = np.invert(preds)
-          goodw_ws = results_array['llgW'] > gws_cut
-          greatw_ws = results_array['llgW'] > xws_cut
+          goodw_ws = results_array['score'] < gws_cut
+          greatw_ws = results_array['score'] < xws_cut
           goodw_wc = results_array['chiW'] < gwc_cut
+          goodw_den = results_array['2fofc_sigo'] > w2f_cut
           pw_gs = np.logical_and(predw,goodw_ws)
           pw_xs = np.logical_and(predw,greatw_ws)
           pw_gc = np.logical_and(predw,goodw_wc)
-
+          pw_gd = np.logical_and(predw,goodw_den)
+          
           good_score = np.logical_or(ps_gs,pw_gs)
           great_score = np.logical_or(ps_xs,pw_xs)
           good_chi = np.logical_or(ps_gc,pw_gc)
+          good_den = np.logical_or(ps_gd,pw_gd)
 
-          logical_ass = np.zeros((results_array.shape[0],4),dtype=np.bool_)
+          scr_table = np.zeros((results_array.shape[0],4),dtype=np.int8)
+          scr_table[:,0] = good_den
+          scr_table[:,1] = good_score
+          scr_table[:,2] = good_chi
+          scr_table[:,3] = great_score
+          
+          logical_ass = np.zeros((results_array.shape[0],2),dtype=np.int16)
           logical_ass[:,0] = preds
-          logical_ass[:,1] = good_score
-          logical_ass[:,2] = good_chi
-          logical_ass[:,3] = great_score
-
+          logical_ass[:,1] = np.nansum(scr_table,axis=1)
 
           #explicit def of all edc
           edc = np.zeros(results_array.shape[0],dtype = np.int16)
           
-          edc1 =(logical_ass == (1,1,1,1)).all(axis=1) #preds,goods,goodc --> good S
-          edc2 =(logical_ass == (1,1,1,0)).all(axis=1) #preds,goods,goodc --> good S
-          edc3 =(logical_ass == (1,0,1,0)).all(axis=1) #preds,bads,goodc --> weak S
-          edc4 =(logical_ass == (1,1,0,0)).all(axis=1) #preds,goods,badc --> bad S
-          edc5 =(logical_ass == (0,1,0,0)).all(axis=1) #predw,goods,badc --> bad W
-          edc6 =(logical_ass == (0,0,1,0)).all(axis=1) #predw,bads,goodc --> weak W
-          edc7 =(logical_ass == (0,1,1,0)).all(axis=1) #predw,goods,goodc --> good W
-          edc8 =(logical_ass == (0,1,1,1)).all(axis=1) #predw,goods,goodc --> good W
+          edc1 =(logical_ass == (1,4)).all(axis=1) #all 4 criteria good great S
+          edc2 =(logical_ass == (1,3)).all(axis=1) #3 out of 4 --> good S
+          edc3 =(logical_ass == (1,2)).all(axis=1) #2 out of 4 --> weak S
+          edc4 =(logical_ass == (1,1)).all(axis=1) #1 out of 4 --> bad S
+          edc5 =(logical_ass == (0,1)).all(axis=1) #etc
+          edc6 =(logical_ass == (0,2)).all(axis=1) #
+          edc7 =(logical_ass == (0,3)).all(axis=1) #
+          edc8 =(logical_ass == (0,4)).all(axis=1) #
           #will remain zero for "junk" peaks
 
 
@@ -914,34 +930,21 @@ class ClassifierFunctions:
 
      def bad_contacts(self,all_peak_db):
           for unal,pdict in all_peak_db.iteritems():
-               if 'proc_data' not in pdict.keys() or pdict['model'] in [1,2] or pdict['status'] in [1,3,6,7]:
+               if pdict['model'] in [1,2] or pdict['status'] in [1,3,6,7]:
                     continue
-               pdata=pdict['proc_data']
-               fc = pdata['fc']
-               edc = pdata['edc']
-               pnw = pdata['prob']
-               if fc == 0:
+               ori_status = pdict['status']
+               fc = pdict['fc']
+               edc = pdict['edc']
+               pnw = pdict['prob']
+               pick = pdict['pick']
+               c1 = pdict['c1']
+               cscore = pdict['cscore']
+               shortest_worst = pdict['worst_mm']
+               if fc in [0,1]: #no problems
                     continue
-               if fc == 1:
-                    pdict['status'] = 490
-               if fc > 1 and fc < 6:
-                    close_cont = self.ppcont.close_cont(pdict['mm_contacts'],cutoff=2.5)
-                    if len(close_cont) > 0:
-                         n_worst = 0
-                         worst = close_cont[0]
-                         for clist in close_cont:
-                              n_close = len(clist)
-                              if n_close > n_worst:
-                                   worst = clist
-                         worst.sort(key = lambda x: x['distance'])
-                         shortest_worst = worst[0]
-                    else:
-                         shortest_worst = pdict['mm_contacts'][0]
-
-
                if fc == 2 or fc == 3: #bad clashes
                     #most model errors have ed score > 0:
-                    if pdata['score'] > 0  or pdata['cscore'] > 0:
+                    if pdict['score'] > 0  or pdict['cscore'] > 0:
                          if shortest_worst['name'] not in ['N','C','CA','O']:
                               pdict['status'] = 401
                          else:
@@ -950,12 +953,12 @@ class ClassifierFunctions:
                          pdict['status'] = 403
 
                if fc == 4: #less bad contacts
-                    if pnw > 0.8: #metal kde/dir prob is > 50%
-                         if pdata['edc'] < 7 and pdict['fofc_sig_out'] > 2.0:
+                    if pnw > 0.8: 
+                         if pdict['edc'] < 7 and pdict['fofc_sig_out'] > 2.0:
                               pdict['status'] = 8001
                          else:
                               pdict['status'] = 410
-                    elif pdata['score'] > 0:
+                    elif pdict['score'] > 0:
                          if shortest_worst['name'] not in ['N','C','CA','O']:
                               pdict['status'] = 411
                          else:
@@ -965,226 +968,386 @@ class ClassifierFunctions:
 
                if fc == 5: #one close contact
                     if pnw > 0.8: 
-                         if pdata['edc'] < 7:
+                         if pdict['edc'] < 7:
                               pdict['status'] = 421
                          else:
                               pdict['status'] = 422
                     elif pnw > 0.5:
-                         if pdata['edc'] > 6:
+                         if pdict['edc'] > 6:
                               pdict['status'] = 423
                          else:
                               pdict['status'] = 424
                     else:
-                         pdict['status'] = 499
+                         if pick != 1: #allow close water to pass thru
+                              if c1 < 1.8:
+                                   pdict['status'] = 422
+                              else:
+                                   if pnw < 0.10:
+                                        pdict['status'] = 1001
+                                        pdict['pick'] = 1
+                                        pdict['tflag'] = 1 #fix pick
+                                   else:
+                                        pdict['status'] = 422
                if fc == 6: #weak
                     pdict['status'] = 431
                if fc == 7: #remote
-                    if pdict['anchor']['model'] == 3:
-                         pdict['status'] = 441
+                    anchor = pdict.get('anchor',None)
+                    if anchor is not None:
+                         if anchor['model'] == 3:
+                              pdict['status'] = 441
                     else:
                          pdict['status'] = 442
-
-               if edc == 0:
-                    pdict['status'] = 499
-
-
-
-     def update_water_models(self,all_peak_db):
-          # first pass, find all recip pairs 
-          claimed_peaks = []
-          for unal,pdict in all_peak_db.iteritems():
-               if pdict['status'] == 7:
-                    continue
-               if pdict['pick'] != 1:
-                    continue
-               if len(pdict['mod_cont']) == 0:
-                    pdict['mflag'] = 1
-               else:
-                    pdict['mod_cont'].sort(key = lambda x: x['distance'])
-                    peak_cont = pdict['cont_db'][unal]
-                    mod_cont = pdict['mod_cont']
-                    for cont in mod_cont:
-                         mc_pdict = all_peak_db[cont['unal']]
-                         mc_mod_cont = mc_pdict['mod_cont']
-                         dist = cont['distance']
-                         if len(mc_mod_cont) == 0:
-                              continue
-                         if mc_mod_cont[0]['unal'] == unal: #recip match
-                              #append all associations, uniquify by set below
-                              #each will be added twice
-                              pdict['sol_mod'].append((mc_pdict['unal'],dist))
-                              mc_pdict['mod_for'].append((unal,dist))
-                              mc_pdict['sol_mod'].append((unal,dist))
-                              pdict['mod_for'].append((mc_pdict['unal'],dist))
-          # second pass, uniquify and check distances,mark clear recip matches
-          for unal,pdict in all_peak_db.iteritems():
-               if pdict['status'] == 7:
-                    continue
-               if pdict['pick'] != 1:
-                    continue
-                # inputs are tuples (unal,dist), only recip, so single matches 
-               pdict['mod_for'] =  list(set(pdict['mod_for']))
-               pdict['mod_for'].sort(key = lambda x: x[1])
-               pdict['sol_mod'] =  list(set(pdict['sol_mod']))
-               pdict['sol_mod'].sort(key = lambda x: x[1])
-               #single recip match for model and peak
-               if len(pdict['mod_for']) == 1 and len(pdict['sol_mod']) == 1:
-                    mod_u, mod_d = pdict['mod_for'][0]
-                    claimed_peaks.append(mod_u)
-                    #close, unambiguous model
-                    if mod_d < 0.7:
-                         pdict['mflag'] = 2
-                         continue
-                    #bit far, either error or split
-                    elif mod_d < 1.7:
-                         pdict['mflag'] = 3
-                         continue
-               else:
-                    pdict['mflag'] = 4 #place holder for further analysis
-          # third pass, look for splits or reverse splits
-          for unal,pdict in all_peak_db.iteritems():
-               if pdict['status'] == 7:
-                    continue
-               if pdict['mflag'] != 4:
-                    continue
-               if len(pdict['mod_for']) > 1 and pdict['pick'] == 1:
-                    mod_u1, mod_d1 = pdict['mod_for'][0]
-                    pdict['mflag'] = 5
-                    all_peak_db[mod_u1]['mflag'] = 6
-                    for mod_u2,mod_d2 in pdict['mod_for'][1:]:
-                         mod_u2, mod_d2 = pdict['mod_for'][1]
-                         claimed_peaks.append(mod_u2)
-                         if abs(mod_d1 - mod_d2) < 0.5:
-                              all_peak_db[mod_u2]['mflag'] = 6
+               reassign = False
+               #metals can be incorrectly flagged, re-examine
+               if pdict['status'] in [401,421]:
+                    if c1 < 1.80:
+                         reassign = False
+                    else:
+                         if pnw < 0.80:
+                              reassign = False
                          else:
-                              all_peak_db[mod_u2]['mflag'] = 7
+                              reassign = True
+               if pdict['status'] == 8001:
+                    if c1 < 2.4:
+                         reassign = True
+               if reassign:
+                    pdict['status'] = ori_status
+
+                    
+
+
+     def update_all_models(self,all_peak_db):
+          peak_list = list(pdict['unal'] for pdict in all_peak_db.values() if (pdict['model'] == 4 and pdict['status'] != 7))
+          proc_sol = list(pdict['unal'] for pdict in all_peak_db.values() if (pdict['model'] == 3 and pdict['status'] not in [1,3,6,7]))
+          nproc_sol = list(pdict['unal'] for pdict in all_peak_db.values() if (pdict['model'] == 3 and pdict['status'] == 6))
+          for uind,unal in enumerate(peak_list):
+               pdict = all_peak_db[unal]
+               self.update_point_model(pdict)
+               #u2r = lambda x: all_peak_db.get(x,{'resat':'Null'})['resat']
+               #print "MOD",pdict['mflag'],pdict['resat']," ".join(list("%s %s" % (u2r(u),d) for u,d in pdict['sol_mod']))
+               if pdict['mflag'] == 1 or len(pdict['sol_mod']) == 0:
+                    continue
+               peak_is_clust = pdict['mf'] % 10 > 2
+               s1_pdict = all_peak_db[pdict['sol_mod'][0][0]]
+               s1_clust = s1_pdict.get('clust_mem',[])
+               mod_is_ma = len(s1_clust) > 0
+               if not peak_is_clust and not mod_is_ma:
+                    continue
+               ma_to_peak = []
+               if mod_is_ma:
+                    for mod_u in s1_clust:
+                         m_pdict = all_peak_db.get(mod_u,{'peak_contacts':[]})
+                         pcont = m_pdict['peak_contacts']
+                         ma_to_peak.extend(list(cont['unal'] for cont in pcont))
+                    ma_to_peak = list(set(ma_to_peak))
+                    pdict['modexp_clust'] = ma_to_peak
+                    pdict['mflag'] = pdict['mflag'] + 100
+               peak_to_sol = []
+               if peak_is_clust:
+                    cmem = pdict['clust_mem']
+                    for m_unal in cmem:
+                         s_pdict = all_peak_db[m_unal]
+                         scont = s_pdict['sol_contacts']
+                         peak_to_sol.extend(list(cont['unal'] for cont in scont))
+                    peak_to_sol = list(set(peak_to_sol))
+                    pdict['modexp_sol'] = peak_to_sol
+                    pdict['mflag'] = pdict['mflag'] + 200
+
+               #u2r = lambda x: all_peak_db.get(x,{'resat':'Null'})['resat']
+               #print "CHECK",pdict['resat']," ".join(list(u2r(x) for x in ma_to_peak)),"||"," ".join(list(u2r(x) for x in peak_to_sol))
+     """
+     def update_mol_model(self,pdict):
+          all_peak_db=pdict['peak_unal_db']
+          ma_to_peak = []
+          if mod_is_ma:
+               for mod_u in s1_clust:
+                         m_pdict = all_peak_db.get(mod_u,{'peak_contacts':[]})
+                         pcont = m_pdict['peak_contacts']
+                         ma_to_peak.extend(list(cont['unal'] for cont in pcont))
+                    ma_to_peak = list(set(ma_to_peak))
+               peak_to_sol = []
+               if peak_is_clust:
+                    cmem = pdict['clust_mem']
+                    for m_unal in cmem:
+                         s_pdict = all_peak_db[m_unal]
+                         scont = s_pdict['sol_contacts']
+                         peak_to_sol.extend(list(cont['unal'] for cont in scont))
+                    peak_to_sol = list(set(peak_to_sol))
+
           
+     """
+     def update_point_model(self,pdict):
+          #assigns mflag based on single closest possible model
+          unal = pdict['unal']
+          all_peak_db = pdict['peak_unal_db']
+          if len(pdict['sol_mod']) == 0:
+               return
+          sol_mod = pdict['sol_mod']
+          # collect booleans for assignment
+          sm_unal = list(ud[0] for ud in sol_mod)
+          recip_mf_list = list(all_peak_db.get(s_unal,{'mod_for':[(None,-99.99),]})['mod_for'] for s_unal in sm_unal)
+          recip = list(mfl[0][0] == unal for mfl in recip_mf_list)
+          rlen = list(len(mfl) for mfl in recip_mf_list)
+          fdpos = list(ud[1] > 0 for ud in sol_mod)
+          vshort = list(mfl[0][1] < 0.7 for mfl in recip_mf_list)
+          short = list(mfl[0][1] < 1.7 for mfl in recip_mf_list)
+          truth_table = np.zeros((4,len(sol_mod)),dtype=np.int)
+          for tind,tdat in enumerate((recip,fdpos,short,vshort)):
+               truth_table[tind] = tdat
+
+          if len(sol_mod) == 1:
+               if (truth_table == True).all():
+                    pdict['mflag'] = 2 #one recip tight match
+                    return
+               if (truth_table[0:3] == True).all():
+                    pdict['mflag'] = 3 #one recip dist match
+                    return 
+               if recip[0] and fdpos[0]: #just too far away
+                    pdict['mflag'] == 1
+                    return
+               if not recip[0] and not fdpos[0]:
+                    pdict['mflag'] = 4 #not recip or already claimed
+                    return
+               if fdpos[0]:
+                    pdict['mflag'] = 8
+                    
+               return #unknown, remains zero
+          if len(sol_mod) > 1:
+               #look at first two sol_mod
+               dlist = list(mfl[0][1] for mfl in recip_mf_list)
+               if (truth_table[0:3,0:2] == True).all(): #two recip matches, both short and ass
+                    if abs(dlist[1]-dlist[0]) < 0.5:
+                         pdict['mflag'] = 5 #sym split
+                         return
+                    else:
+                         pdict['mflag'] = 6 #asym split
+                         return
+               if (truth_table[0:2,0:2] == True).all(): #not short
+                    n_short = np.count_nonzero(truth_table[2,0:2])
+                    n_vshort = np.count_nonzero(truth_table[3:0:2])
+                    if n_vshort == 1 and n_short == 1:
+                         pdict['mflag'] = 2 #discard far peak
+                         return
+                    elif n_short == 1:
+                         pdict['mflag'] = 6
+                         return
+               if recip[0] or recip[1]:
+                    if short[0] and short[1]:
+                         pdict['mflag'] = 7
+                         return
+
+          """
+          print "RECIP",pdict['resat'],recip,fdpos,rdpos,vshort,short,rlen
+          recip1_pdict = all_peak_db.get(sol_mod[0][0],None)
+          if recip1_pdict is not None:
+               
+               mod_for = list(ud for ud in recip1_pdict['mod_for'] if ud[1] > 0)
+               if mod_for[0][0] == unal: #recip match
+                    if len(sol_mod) == 1 and len(mod_for) == 1:
+                         mod_u, mod_d = mod_for[0]
+                         #close, unambiguous model
+                         if mod_d > 0.0 and mod_d < 0.7:
+                              pdict['mflag'] = 2
+                              return
+                         #bit far, 
+                         elif mod_d > 0.0 and mod_d < 1.7:
+                              pdict['mflag'] = 3
+                              return
+                         elif mod_d < 0.0:
+                              pdict['mflag'] = 4 #different peak
+                              return
+                    elif len(sol_mod) > 1: #multiple models for single peak 
+
+                         mod_u1, mod_d1 = sol_mod[0]
+                         mod_u2, mod_d2 = sol_mod[1]
+                         m1_mf1 = all_peak_db[mod_u1]['mod_for'][0] #closest recip for 1st
+                         m2_mf1 = all_peak_db[mod_u2]['mod_for'][0] #closest recip for 2nd
+                         if m2_mf1[0] == unal: #2nd also recip match
+                              ddiff = abs(mod_d1 - mod_d2)
+                              if ddiff < 0.5:
+                                   pdict['mflag'] = 5 #clear split
+                              else:
+                                   pdict['mflag'] = 6 #distant split
+                         else:
+                              pdict['mflag'] = 7 #2nd not matching
+                    elif len(mod_for) > 1 and len(sol_mod) == 1:
+                         peak_u1, peak_d1 = mod_for[0]
+                         peak_u2, peak_d2 = mod_for[1]
+                         p2_sm1 = all_peak_db[peak_u2]['sol_mod'][0] #closest recip for 2nd
+                         if p2_sm1[0] == sol_mod[0]:
+                              pdict['mflag'] = 8
+                         else:
+                              pdict['mflag'] = 9
+          
+               else:
+                    pdict['mflag'] = 10
+          """
 
      def update_anchors(self,all_peak_db,allow_cross=False):
-          # 1) scores peaks from histogram populations
-          # 2) marks high scoring and highly likely water and sulfate
-          # 3) goes through all peaks and uses these peaks
-          #    as new anchors, updates c1 distance accordingly
+          # 1) scores peaks and updates status
+          # 2) rescores all peaks with a c1 value of 2.2
+          # 3) if 'prob' does drops below 0.2, likely can be water
+          # 4) selects peaks marked as not water but could be water
+          #    and searchers for a closer anchor to update c1
           self.score_peaks(all_peak_db)
           self.ws_pass1(all_peak_db)
           anc_updates = 0
-          
-          for unal,pdict in all_peak_db.iteritems():
+          mm_ulist = self.class_mismatches(all_peak_db)
+   
+
+          for unal in mm_ulist:
+               pdict = all_peak_db[unal]
                update = False
                ori_c1 = pdict.get('c1',99.9)
-               if pdict['status'] in [1,2,3,6,7]:
-                    continue
+               tmp = float(ori_c1)
                allowed_models = [pdict['model'],]
                if allow_cross and pdict['model'] == 4:
                     allowed_models.append(3)
                elif allow_cross and pdict['model'] == 3:
                     allowed_models.append(4)
-               if 'anc_cont' not in pdict.keys():
-                    continue
+               if pdict['mf'] % 10 == 0:
+                    local_clust = []
+               else:
+                    local_clust = pdict.get('clust_mem',[])
+               culled_anc = []
                if len(pdict['anc_cont']) > 0:
-                    for anc_cont in pdict['anc_cont']:
-                         anc_pdict = all_peak_db[anc_cont['unal']]
-                         if anc_pdict['model'] in allowed_models:
-                              if anc_pdict['status'] in [1700,1500,2700,2500]:# > 1000 and anc_pdict['status'] < 5000:
-                                   if anc_cont['distance'] < (ori_c1 - 0.1): #shorter contact?
-                                        anc_pdict['anc_for'].append(pdict['unal'])
-                                        update = True
-                                        pdict['c1'] = anc_cont['distance']
-                                        pdict['proc_data']['c1'] = anc_cont['distance']
-                                        pdict['anchor'] = anc_cont
-
+                    for anc_cont in sorted(pdict['anc_cont'], key = lambda x: x['distance'],reverse=True):
+                         anc_pdict = all_peak_db.get(anc_cont['unal'],None)
+                         if anc_pdict is None:
+                              continue
+                         #criteria for updating anchor,valid peak, not in self cluster
+                         allowed = anc_pdict['model'] in allowed_models 
+                         valid_s = anc_pdict['status'] > 1099 and anc_pdict['status'] < 5000
+                         valid_f = anc_pdict.get('fc',0) not in [2,3,6,7]
+                         shorter = anc_cont['distance'] < (ori_c1 - 0.1)
+                         anchored = anc_pdict['c1'] < ori_c1
+                         if anc_pdict['unal'] in local_clust:
+                              noclust = False
+                              if all((allowed,valid_s,valid_f,shorter,anchored)):
+                                   print "MODANC_CHECK",pdict['resat'],pdict['status'],anc_pdict['resat'],anc_pdict['status'],anc_cont['distance']
+                         else:
+                              noclust = True
+                         if all((allowed,valid_s,valid_f,shorter,noclust,anchored)):
+                              culled_anc.append(anc_cont)
+               if len(culled_anc) > 0:
+                    new_anchor = culled_anc[0]
+                    nanc_pdict = all_peak_db[new_anchor['unal']]
+                    anc_for = nanc_pdict.get('anc_for',[])
+                    anc_for.append(pdict['unal'])
+                    nanc_pdict['anc_for'] = list(set(anc_for))
+                    update = True
+                    pdict['c1'] = new_anchor['distance']
+                    ori_c1 = new_anchor['distance']
+                    pdict['anchor'] = new_anchor
                if update:
-                    #n_anc = all_peak_db[pdict['anchor']['unal']]
                     anc_updates = anc_updates + 1
+                    print "UPANC",pdict['resat'],pdict['status'],ori_c1,tmp,pdict['anchor']['resat']
           return anc_updates
 
 
      def ws_pass1(self,all_peak_db):
-          #initial pass to assign status for best water and sulfate peaks
+          #assigns status based on quality of pick, wsom
           #models and anchors initially ignored
           ppcont = self.ppcont
+
           for unal,pdict in all_peak_db.iteritems():
-               #skip problem peaks(status = 4), unprocessed peaks (status 1,3,6,7) any well sorted s/w
-               if pdict['status'] in [1,3,4,6,7]:
+               if pdict['model'] in [1,2] or pdict['status'] in [-1,1,2,3,6,7]:
                     continue
-               new_status = pdict['status']
-               pdata = pdict['proc_data']
-               edc = pdata['edc']
-               cc = pdata['cc']
-               rc = pdata['rc']
-               fc = pdata['fc']
+               if pdict['status'] > 399 and pdict['status'] < 499:
+                    continue #ignore flagged peaks that are bad
+               filter_mask = pdict['filter_mask']
+               filter_cuts = (6,6,6,3)
+               edc = pdict['edc']
+               cc = pdict['cc']
+               rc = pdict['rc']
+               fc = pdict['fc']
                pick = pdict['pick']
                ambig = pdict['ambig']
-               pnw = pdata['prob']
-               pnw_match = (pnw > 0.8 and pick > 1) or (pnw < 0.2 and pick == 1)
-               good_w = edc > 6 and cc > 6 and rc > 7 and pick == 1
-               good_s = edc < 3 and cc < 3 and rc in [1,2] and pick == 2
-               good_o = pdata['chiW'] > 20.0 and pick == 3
-               good_m = pdata['chiS'] < 40.0 and pick == 4
+               probs = pdict['prob_data']
+               pnw = pdict['prob']
+               pnw_match = (pnw > 0.85 and pick > 1) or (pnw < 0.15 and pick == 1)
+               not_filt = filter_mask[pick-1] < filter_cuts[pick-1]
+               good_w = np.nansum(probs[0,0]) > 0.0 and pick == 1 and not_filt
+               good_s = np.nansum(probs[0,1]) > 0.0 and pick == 2 and not_filt
+               good_o = np.nansum(probs[0,2]) > 0.0 and pick == 3 and not_filt
+               good_m = np.nansum(probs[0,3]) > 0.0 and pick == 4 and not_filt
                any_good = good_w or good_s or good_o or good_m
                new_status = 1000*pick+400*pnw_match+200*(not ambig)+100*any_good
+               
                if pdict['status'] != new_status:
-                    pdict['status'] = new_status
+                    pdict['status'] = new_status 
 
      def class_mismatches(self,all_peak_db):
+          #if c1 is not set correctly (no good anchor found)
+          #classification can be off, or it may not matter
+          #try a c1 distance of 2.2 
+          temp_db = {}
+          mismatch_ulist = []
           for unal,pdict in all_peak_db.iteritems():
-               #skip problem peaks, peaks already scored, or modeled solvent
-               if pdict['status'] not in [0,4,5]:
-                    continue
-               pdata = pdict['proc_data']
-               edc = pdata['edc']
-               cc = pdata['cc']
-               rc = pdata['rc']
-               fc = pdata['fc']
-               pick = pdict['pick']         
-               w_mismatch = pdata['prob'] < 0.8 and pick != 1
-               som_mismatch = pdata['prob'] > 0.8 and pick == 1
-               if w_mismatch: # chi says water, but grid says not
-                    if pdict['c1'] > 3.2:
-                         if edc == 0: 
-                              pdict['status'] = 5000
-                         else: 
-                              pdict['status'] = 5001
-                    else:
-                         if pdict['c1'] > 2.5 and fc == 0 and pick != 1:
-                              pdict['status'] = 7000 #missed other
-               elif pdict['status'] < 100 and pdata['prob'] < 0.2:
-                    pdict['status'] = 5002
-               if som_mismatch:
-                    if pdata['cscore'] < 1.0 and pick == 4:
-                         pdict['status'] = 8000
-                    elif pdata['prob'] < 0.8:
-                         pdict['status'] = 8002
-                    elif pdata['prob'] > 0.8:
-                         pdict['status'] = 8003
-
-               
+               if pdict['status'] not in  [-1,1,2,3,6,7] and pdict['c1'] > 2.2:
+                    #check all peaks, but only labeled water
+                    if pdict['model'] == 4 or ( pdict['model'] == 3 and pdict['label'] == 1):
+                         temp_db[unal] = pdict.copy()
+                         temp_db[unal]['c1'] = 2.2
+          #if picks change upon shortening of c1, mark as mismatch
+          new_plist = list(pdict for pdict in temp_db.values())
+          scan_array = self.ppio.extract_raw(new_plist)
+          #copied from tasks
+          self.contact_da(scan_array)
+          self.standardize_data(scan_array,post_pca=True,composite=True)
+          self.chi_prob(scan_array)
+          self.ppio.update_from_np(temp_db,scan_array)
+          self.score_peaks(temp_db)
+          for unal in temp_db.keys():
+               pd1 = all_peak_db[unal]
+               pd2 = temp_db[unal]
+               pick1 = pd1['pick']
+               prob2 = pd2['prob']
+               if pick1 > 1 and prob2 < 0.2:
+                    mismatch_ulist.append(unal)
+          #if edc and cc mismatch, also mark
+          #if c1 distance out of range for water pick
+          for unal,pdict in all_peak_db.iteritems():
+               if pdict['status'] not in  [-1,1,2,3,6,7] and pdict['c1'] > 2.2:
+                    if pdict['model'] == 4 or (pdict['model'] == 3 and pdict['label'] == 1):
+                         if pdict['edc'] in [6,7,8] and pdict['cc'] in [1,2,3]:
+                              mismatch_ulist.append(unal)
+                         if pdict['c1'] > 3.5 and pdict['pick'] == 1:
+                              mismatch_ulist.append(unal)
+          mismatch_ulist = list(set(mismatch_ulist))
+          print "MISMATCHES"," ".join(list(all_peak_db[unal]['resat'] for unal in mismatch_ulist))
+          return mismatch_ulist
 
      def score_peaks(self,db_of_peaks):
           for pdict in db_of_peaks.values():
-               if pdict['ptype'] in ['peakin','modsol'] and pdict['status'] not in [1,3]:
-                    preds = pdict['pred_data']
+               if pdict['status'] not in [-1,1,2,3,6,7]:
                     probs = pdict['prob_data']
-                    pdata = pdict['proc_data']
-                    resid_names = pdict['resid_names']
-                    strong = (preds[:,0] == preds[0,0]).all()
-                    ambig = ~strong
-                    if not ambig:
-                         pick1 = preds[0,0]
-                         pick_name = resid_names[pick1-1]
+                    if 'resid_names' not in pdict:
+                         resid_names = pdict['master_dict']['kde']['populations']
                     else:
-                         tally = np.bincount(preds[:,0],minlength=5)
-                         pick1 = np.argmax(tally)
-                         pick_name = resid_names[pick1-1]
+                         resid_names = pdict['resid_names']
+                    if pdict['tflag'] == 1: #fixed pick
+                         pick1 = pdict['pick']
+                    else:
+                         pick1 = self.pput.pick_from_prob(probs)
+                         #hack to cull mispicked metals,force another pick
+                         if pick1 == 4 and (pdict['c1'] > 3.1 or pdict['cscore'] > 1.0):
+                              nprobs = probs.copy()
+                              nprobs[:,3] = -99.9
+                              pick1 = self.pput.pick_from_prob(nprobs)
+                    best_picks = np.argmax(probs,axis=1)+1
+                    if (best_picks == pick1).all():
+                         ambig = False
+                    else:
+                         ambig = True
+                    pick_name = resid_names[pick1-1]
                     pdict['pick'] = pick1
                     pdict['pick_name'] = pick_name
                     pdict['ambig'] = ambig
-               else:
-                    pdict['pick'] = 0 #unknown
-                    pdict['pick_name'] = "MOD"
-                    pdict['ambig'] = False
 
      def chi_prob(self,data_array):
+          #Logistic Model on difference between sum Chisq for SO4 and HOH
+          #gives a "probability of "not water"
           if self.chiD_coeffs is None:
                sys.exit("NO chiD COEFFICIENTS, ERROR!")
           chiS = np.add(data_array['chiS'],data_array['cchiS'])

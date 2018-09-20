@@ -5,6 +5,7 @@ np.set_printoptions(suppress=True)
 np.set_printoptions(linewidth=1e6, edgeitems=1e6)
 from PProbe_selectors import Selectors
 from PProbe_util import Util
+from PProbe_filter import Filters
 ppsel = Selectors(None)
 
 
@@ -35,7 +36,87 @@ class DataIO:
                                  'STU','PG0','FOL','CYN','VO4','MBO','CPT','CHD','PPV','MPO','DMU','ALF','PGA','SFG','H2S','CXS','15P',
                                  '12P','URE','SRT','P33','CYC','BLA','MOH','LAT','BCR','BCN','A2G','GAI']
 
-          self.common_elem = [' BA',' BR',' HG','  I',' CO',' CD',' NI',' CU',' FE','  K',' MN',' NA',' CA',' CL',' MG',' ZN']
+          self.common_elem = ['BA','BR','HG','I','CO','CD','NI','CU','FE','K','MN','NA','CA','CL','MG','ZN']
+
+          self.common_oth = ['DTT', 'MAL', 'EOH', 'SUC', 'SCN', 'P6G', 'GSH', 'CO3', 'CIT', 'BOG', 'NO3', 'IMD', 'BME', 'ACY', 
+                             'PGE', 'PG4', 'TRS', 'MPD', 'DMS', 'PEG', 'ACT', 'EDO', 'GOL', 'CL',  'BR',  'AZI', 'GNP', 'BGC', 
+                             'BEN', 'H4B', 'SF4', 'GLC', 'RET', '1PE', 'ACP', 'CAC', 'FLC', 'EPE', 'AKG', 'LDA', 'SAM', 'POP', 
+                             'F3S', 'NAI', 'MLI', 'NDG', 'THP', 'HED', 'NH4', 'TLA', 'FES', 'HEC', 'MRD', 'UNL', 'IPA', 'PLP', 
+                             'MES', 'NCO', 'PLM', 'MAN']
+
+          self.common_met = ['MG','CA','ZN','MN','NI','CD','CO','FE']
+
+
+
+          self.pdict_to_numpy = {"cchiS":"cchiS",
+                 "cchiW":"cchiW",
+                 "chiS":"chiS",
+                 "chiW":"chiW",
+                 "cllgS":"cllgS",
+                 "cllgW":"cllgW",
+                 "cscore":"cscore",
+                 "llgS":"llgS",
+                 "llgW":"llgW",
+                 "prob":"prob",
+                 "prob_data":"kde",
+                 "pick":"pick",
+                 "score":"score",
+                 "oh":"oh",
+                 "ol":"ol",
+                 "om":"om",
+                 "sl":"sl",
+                 "sm":"sm",
+                 "sp":"sp",
+                 "st":"st",
+                 "wl":"wl",
+                 "wm":"wm",
+                 "wt":"wt",
+                 "2fofc_sigo_scaled":"2fofc_sigo",
+                 "c1":"c1",
+                 "charge":"charge",
+                 "fofc_sigo_scaled":"fofc_sigo",
+                 "so4_2fofc_mean_cc60":"ccS260",
+                 "so4_2fofc_stdev_cc60":"sdS260",
+                 "so4_cc_2fofc_inv_in":"ccSi2i",
+                 "so4_cc_2fofc_inv_out":"ccSi2o",
+                 "so4_cc_2fofc_inv_rev":"ccSi2r",
+                 "so4_cc_2fofc_out":"ccS2",
+                 "so4_cc_fofc_inv_in":"ccSifi",
+                 "so4_cc_fofc_inv_out":"ccSifo",
+                 "so4_cc_fofc_inv_rev":"ccSifr",
+                 "so4_cc_fofc_out":"ccSf",
+                 "so4_fofc_mean_cc60":"ccSf60",
+                 "so4_fofc_stdev_cc60":"sdSf60",
+                 "vol_2fofc":"v2",
+                 "vol_fofc":"vf",
+                 "wat_cc_2fofc_inv":"ccWi2",
+                 "wat_cc_2fofc_out":"ccW2",
+                 "wat_cc_fofc_inv":"ccWif",
+                 "wat_cc_fofc_out":"ccWf",
+                 "batch":"batch",
+                 "bin":"bin",
+                 "cc":"cc",
+                 "db_id":"id",
+                 "edc":"edc",
+                 "fc":"fc",
+                 "label":"lab",
+                 "mf":"mf",
+                 "mflag":"mflag",
+                 "model":"model",
+                 "label":"lab",                
+                 "omit":"omit",
+                 "orires":"ori",
+                 "rc":"rc",
+                 "resolution":"res",
+                 "solc":"solc",
+                 "status":"status",
+                 "unal":"unal",
+                 "dmove":"dmove",
+                 "scr1":"scr1",
+                 "scr2":"scr2",
+                 "scr3":"scr3",
+                 "tflag":"tf"}
+
           if phenix_python:
                from PProbe_contacts import Contacts
                self.prune_cont = Contacts.prune_cont
@@ -44,68 +125,34 @@ class DataIO:
      def extract_raw(self,features_list):
           pput = Util()
           master_array=self.initialize_master(len(features_list))
-          #translates items from feature dictionary to master array column type
-          f2m = {'so4_cc_fofc_out':'ccSf',
-                 'so4_cc_2fofc_out':'ccS2',
-                 'wat_cc_fofc_out':'ccWf',
-                 'wat_cc_2fofc_out':'ccW2',
-                 'so4_cc_fofc_inv_in':'ccSifi',
-                 'so4_cc_fofc_inv_out':'ccSifo',
-                 'so4_cc_fofc_inv_rev':'ccSifr',
-                 'so4_cc_2fofc_inv_in':'ccSi2i',
-                 'so4_cc_2fofc_inv_out':'ccSi2o',
-                 'so4_cc_2fofc_inv_rev':'ccSi2r',
-                 'wat_cc_fofc_inv':'ccWif',
-                 'wat_cc_2fofc_inv':'ccWi2',
-                 'so4_fofc_mean_cc60':'ccSf60',
-                 'so4_fofc_stdev_cc60':'sdSf60',
-                 'so4_2fofc_mean_cc60':'ccS260',
-                 'so4_2fofc_stdev_cc60':'sdS260',
-                 'fofc_sigo_scaled':'fofc_sigo',
-                 '2fofc_sigo_scaled':'2fofc_sigo',
-                 'charge':'charge',
-                 'db_id':'id',
-                 'ol':'ol',
-                 'om':'om',
-                 'oh':'oh',
-                 'wl':'wl',
-                 'wm':'wm',
-                 'sl':'sl',
-                 'sm':'sm',
-                 'sp':'sp',
-                 'c1':'c1',
-                 'pc1d':'pc1d',
-                 'pc1id':'pc1id',
-                 'pc2d':'pc2d',
-                 'pc2id':'pc2id',
-                 'pc3d':'pc3d',
-                 'pc3id':'pc3id',
-                 'solc':'solc',
-                 'orires':'ori',
-                 'bin':'bin',
-                 'resolution':'res',
-                 'omit':'omit',
-                 'vol_fofc':'vf',
-                 'vol_2fofc':'v2',
-                 'dmove':'dmove',
-                 'unal':'unal'}
+          #generates a master numpy array for all calculations from list of feature dictionaries
           for index,fdict in enumerate(features_list):
                if 'fofc_sigo_scaled' not in fdict.keys():
                     fdict['fofc_sigo_scaled'] = pput.scale_density(fdict['fofc_sig_out'],fdict['solc'])
                if '2fofc_sigo_scaled' not in fdict.keys():
                     fdict['2fofc_sigo_scaled'] = pput.scale_density(fdict['2fofc_sig_out'],fdict['solc'])
-               for column in f2m.keys():
-                    master_array[f2m[column]][index] = fdict[column]
+               for dname,np_name in self.pdict_to_numpy.iteritems():
+                    master_array[np_name][index] = fdict.get(dname,0)
           return master_array
 
+     def update_from_np(self,all_peak_db,master_array):
+          #dictionary is reversible in this case
+          ppfilt = Filters(verbose=False)
+          filter_mask = ppfilt.feat_filt(master_array)
+          for pind,peak in enumerate(master_array):
+               unal = peak['unal']
+               for dname,np_name in self.pdict_to_numpy.iteritems():
+                    all_peak_db[unal][dname] = peak[np_name]
+               #add a filter value
+               all_peak_db[unal]['filter_mask'] = list(filter_mask[pind])
 
      def initialize_master(self,num_peaks):
           """
           Define the master numpy array that holds all peak information for numerical analysis 
           including features, calculated values, contact lists, etc.
           FIELD       Data Type     Description
-          unal        i8         desc    -- unal for each input peak, completely unique 64bit int
-          id          string     desc    --  id for every peak --> abcd_X_00000 abcd=pdbid or "user",X = chainid, 00000 = serial number
+          unal        i8         info    -- unal for each input peak, completely unique 64bit int
+          id          string16   info    --  id for every peak --> abcd_X_00000 abcd=pdbid or "user",X = chainid, 00000 = serial number
           ccSf        f4         feature -- RScorr for S refined against fofc
           ccWf        f4         feature -- RScorr for W refined against fofc
           ccS2        f4         feature -- RScorr for S refined against 2fofc
@@ -123,7 +170,7 @@ class DataIO:
           ccS260      f4         feature -- Mean RScorr for S after rotation 60degrees around each of 4 atomic axes, 2fofc
           sdSf60      f4         feature -- Mean StDev of ccS260
           vf          f4         feature -- Num of 0.5A map gridpoints above sol-scaled 1sigma fofc map (conv from int)
-          v2          f4         feature -- Num of 0.5A map gridpoints above sol-scaled 1sigma 2fofc map (conf from int)
+          v2          f4         feature -- Num of 0.5A map gridpoints above sol-scaled 1sigma 2fofc map (conv from int)
           charge      f4         feature -- sum of logodds ratios for atomic contacts, approximates electrostat potential
           fofc_sigo   f4         feature -- fofc sigma height of peak after refinement, solc-corrected (not used in classifier)
           2fofc_sigo  f4         feature -- 2fofc sigma height of peak after refinement, solc-corrected
@@ -139,23 +186,12 @@ class DataIO:
           st          i1         feature -- sum sl,sm
           sp          i1         feature -- number of self contacts in peak structure (special positions)
           c1          f4         feature -- ang dist to first non-H, non W/S contact in original structure
-          pc1id       string     feature -- id of closest other peak (cluster analysis)
-          pc1d        f4         feature -- dist between self and pc1id
-          pc2id       string     feature -- id of 2nd closest other peak (cluster analysis)
-          pc2d        f4         feature -- dist between self and pc2id
-          pc3id       string     feature -- id of 3rd closest other peak (cluster analysis)
-          pc3d        f4         feature -- dist between self and pc3id
-          presc       string     feature -- identifier string for closest structural contact
-          presd       f4         feature -- dist from presc to peak
-
           res         f4         general feature -- resolution of peak (same for all within one pdb)
           bin         i1         general feature -- resolution bin (1-9, roughly eq vol recip space, 1=high, 9=low)
           solc        f4         general feature -- structure solvent content, used for map variance correction
-
-          ori         string     label -- original residue at peak position
-          batch       i2         label -- randomly assigned integer, usually 0-999 for CV/testing
-          omit        bool       label -- flag to omit for training (bad r-fact, etc.)
-
+          ori         string     info  -- original residue at peak position
+          batch       i2         info -- randomly assigned integer, usually 0-999 for CV/testing
+          omit        bool       info -- flag to omit for training (bad r-fact, etc.)
           prob        f4         calc -- function of score and cscore, top level classifier
           score       f4         calc -- llr S vs W for electron density features
           llgS        f4         calc -- llg for S vs random for electron density feature
@@ -167,62 +203,33 @@ class DataIO:
           cllgW       f4         calc -- llg for W vs random for contact feature
           cchiS       f4         calc -- chisq for S vs dist for contact feature
           cchiW       f4         calc -- chisq for W vs dist for contact feature
-          
-          fc          i1         calc -- flag class (special, weak, bad contacts, etc.)
-          edc         i1         calc -- electron density class (quality of fit to ED calc values)
-          cc          i1         calc -- contact class (quality of fit to contact calc values)
-          mf          i1         calc -- peak cluster class (multiple peaks for one solvent molecule, etc.)
-          rc          i1         calc -- results class (S/W assignment and how many stats below cutoffs)
-
-          scr1        f4         scr -- column for storing/pasing intermediate results
-          scr2        f4         scr -- column for storing/pasing intermediate results
-          scr3        f4         scr -- column for storing/pasing intermediate results
+          kde         3x4f4      calc -- scores from kde
+          pick        i2         calc -- current pick from prob
+          fc          i1         info -- flag class (special, weak, bad contacts, etc.)
+          edc         i1         info -- electron density class (quality of fit to ED calc values)
+          cc          i1         info -- contact class (quality of fit to contact calc values)
+          mf          i4         info -- peak cluster class (multiple peaks for one solvent molecule, etc.)
+          rc          i1         info -- results class (S/W assignment and how many stats below cutoffs)
+          status      i4         info -- status int 
+          tflag       i4         info -- temporary flag
+          scr1        f4         scr  -- column for storing/pasing intermediate results
+          scr2        f4         scr  -- column for storing/pasing intermediate results
+          scr3        f4         scr  -- column for storing/pasing intermediate results
 
           """
 
-          self.master_cols = ["unal","id","ccSf","ccWf","ccS2","ccW2","ccSifi","ccSifo","ccSi2i",
-                              "ccSi2o","ccSifr","ccSi2r","ccWif","ccWi2","ccSf60","sdSf60","ccS260",
-                              "sdS260","vf","v2","charge","fofc_sigo","2fofc_sigo","dmove","ol",
-                              "om","oh","wl","wm","wt","sl","sm","st","sp",
-                              "c1","pc1id","pc1d","pc2id","pc2d","pc3id","pc3d",
-                              "res","bin","solc","ori","batch","omit","prob",
-                              "score","llgS","llgW","chiS","chiW","cscore","cllgS","cllgW",
-                              "cchiS","cchiW","fc","edc","cc","mf","rc","scr1",
-                              "scr2","scr3"]
+          self.master_cols = ["cchiS","cchiW","chiS","chiW","cllgS","cllgW","cscore","llgS","llgW","prob","kde","pick","score","oh","ol","om","sl","sm","sp","st","wl","wm","wt","2fofc_sigo","c1","charge","fofc_sigo","ccS260","sdS260","ccSi2i","ccSi2o","ccSi2r","ccS2","ccSifi","ccSifo","ccSifr","ccSf","ccSf60","sdSf60","v2","vf","ccWi2","ccW2","ccWif","ccWf","batch","bin","cc","id","edc","fc","lab","mf","mflag","model","omit","ori","rc","res","solc","status","unal","dmove","scr1","scr2","scr3","tf"]
 
-          self.master_fmts = ['i8','S16','f4','f4','f4','f4','f4','f4','f4',
-                              'f4','f4','f4','f4','f4','f4','f4','f4',
-                              'f4','f4','f4','f4','f4','f4','f4','i1',
-                              'i1','i1','i1','i1','i1','i1','i1','i1','i1',
-                              'f4','S16','f4','S16','f4','S16','f4',
-                              'f2','i1','f2','S3','i2','?','f4',
-                              'f4','f4','f4','f4','f4','f4','f4','f4',
-                              'f4','f4','i1','i1','i1','i1','i1','f4',
-                              'f4','f4']
+
+          self.master_fmts = ["f4","f4","f4","f4","f4","f4","f4","f4","f4","f4","(3,4)f4","i2","f4","i1","i1","i1","i1","i1","i1","i1","i1","i1","i1","f4","f4","f4","f4","f4","f4","f4","f4","f4","f4","f4","f4","f4","f4","f4","f4","f4","f4","f4","f4","f4","f4","i2","i1","i1","S16","i1","i1","i1","i4","i1","i1","?","S3","i1","f4","f4","i4","i8","f4","f4","f4","f4","i4"]
+
+
+
           self.master_dtype = np.dtype(zip(self.master_cols,self.master_fmts))
 
           #initialize array all zeros and return
           master_data=np.zeros(num_peaks,dtype=self.master_dtype)
           return master_data
-
-
-     def store_master(self,master_array,filename):
-          self.master_csv_format = ['%12s','%8g','%8g','%8g','%8g','%8g','%8g','%8g',
-                                    '%8g','%8g','%8g','%8g','%8g','%8g','%8g','%8g',
-                                    '%8g','%8g','%8g','%8g','%8g','%8g','%8g','%2g',
-                                    '%2g','%2g','%2g','%2g','%2g','%2g','%2g','%2g','%2g',
-                                    '%4g','%12s','%4g','%12s','%4g','%12s','%4g','%10s',
-                                    '%4g','%4g','%1d','%4g','%3s','%3d','%1d','%4g',
-                                    '%8g','%8g','%8g','%8g','%8g','%8g','%8g','%8g',
-                                    '%8g','%8g','%1d','%1d','%1d','%1d','%1d','%8g',
-                                    '%8g','%8g']      
-          print "STORING ALL DATA FOR %s PEAKS TO CSV FILE %s" % (master_array.shape[0],filename)
-          np.savetxt(filename,master_array,fmt=",".join(self.master_csv_format))
-
-     def read_master(self,filename):
-          master_array = np.loadtxt(filename,delimiter=',',dtype=self.master_dtype)
-          return master_array
-
 
      
 
@@ -252,165 +259,6 @@ class DataIO:
           f.close()
 
 
-
-     def read_features_csv(self,filename):
-          data_array = np.loadtxt(filename,delimiter=',',dtype=self.np_raw_dtype)
-          print "READ FEATURES FOR %s PEAKS FROM FILE %s" % (data_array.shape[0],filename)
-          return data_array
-
-
-
-     def model_rep(self,pdict):
-          pdata=pdict['proc_data']
-          mplist = pdict['mod_cont'] #actually a contact list
-          mflag = pdict['mflag']
-          report = ["MC=%s" % mflag,]
-          if mflag in [0,4]:
-               report.append("Unknown Solvent Model")
-          if mflag == 1:
-               report.append("Unmodeled")
-          if mflag == 2:
-               mp = mplist[0]
-               report.append("Modeled as %s (%2.1fA away)" % (mp['resat'],mp['distance']))
-          if mflag == 3:
-               mp = mplist[0]
-               report.append("Possibly modeled as %s, but %2.1fA away" % (mp['resat'],mp['distance']))
-          if mflag == 5:
-               report.append("Split model [%s]for single peak" % " ".join(mp['resat'] for mp in mplist))
-          if mflag == 6:
-               report.append("Shared model for multiple peaks [%s]" % " ".join(mp['resat'] for mp in mplist))
-          if mflag == 7:
-               report.append("Ambiguous model for multiple peaks [%s]" % " ".join(mp['resat'] for mp in mplist))
-          return report
-
-     def contact_rep(self,pdict):
-          report = ["peak %s has status %s" % (pdict['db_id'],pdict['status']),]
-          return report
-          if fc == 1: #special
-               pdict['warnings'].append("SPL")
-               noself_med_cont = self.prune_cont(pdict['w_contacts'],omit_unrg=[pdict['unrg'],],omit_null=True,cutoff=2.5)
-               noself_bad_cont = self.prune_cont(pdict['w_contacts'],omit_unrg=[pdict['unrg'],],omit_null=True,cutoff=1.7)
-               report.append("At/Near Special -- Med: %s Bad: %s" % (len(noself_med_cont),len(noself_bad_cont)))
-
-          if fc > 1 and fc < 6:
-               close_cont = self.close_cont(pdict['mm_contacts'])
-               if len(close_cont) > 0:
-                    n_worst = 0
-                    worst = close_cont[0]
-                    for clist in close_cont:
-                         n_close = len(clist)
-                         if n_close > n_worst:
-                              worst = clist
-                         resname = clist[0]['resname']
-                         chain = clist[0]['chain']
-                         resid = clist[0]['resid']
-                         cid = resname+"_"+chain+str(resid)
-                         report.append("%s close contacts to %s" % (n_close,cid))
-                    worst.sort(key = lambda x: x['distance'])
-                    shortest_worst = worst[0]
-               else:
-                    shortest_worst = pdict['mm_contacts'][0]
-
-
-          if fc == 2: #bad clashes
-               pdict['warnings'].append("CONT1")
-               #most model errors have ed score > 0:
-               if pdata['score'] > 0 or pdata['cscore'] > 0:
-                    if shortest_worst['name'] not in ['N','C','CA','O']:
-                         report.append("--> ALT/ROT error at %s?" % shortest_worst['resat'])
-                    else:
-                         report.append("--> BACKBONE error/alt at %s?" % shortest_worst['resat'])
-               else:
-                    report.append("--> Spurious/Noise Peak?")
-
-          if fc == 3 or fc == 4: #less bad contacts
-               pdict['warnings'].append("CONT2")
-               probs = pdict['prob_data']
-               if probs[2][3] > 0.5: #metal kde/dir prob is > 50%
-                    if pdata['edc'] < 7 and pdict['fofc_sigo'] > 2.0:
-                         report.append("Likely Metal Ion")
-                    else:
-                         report.append("Likely Model Error at %s, possibly Metal Ion" % shortest_worst['resat'])
-               elif pdata['score'] > 0:
-                    if shortest_worst['name'] not in ['N','C','CA','O']:
-                         report.append("--> ALT/ROT error at %s?" % shortest_worst['resat'])
-                    else:
-                         report.append("--> BACKBONE error/alt at %s?" % shortest_worst['resat'])
-               else:
-                    report.append("--> Spurious/Noise Peak?")
-
-          if fc == 5: #one close contact
-               pdict['warnings'].append("CONT3")
-               probs = pdict['prob_data']
-               if probs[2][3] > 0.5: 
-                    if pdata['edc'] < 7:
-                         report.append("Possible Metal Ion")
-                    else:
-                         report.append("Likely Model Error at %s" % shortest_worst['resat'] )
-               elif probs[2][0] > 0.5:
-                    if pdata['edc'] > 6:
-                         report.append("--> Close Water")
-                    else:
-                         report.append("Possible Close Water")
-               else:
-                    report.append("Ambiguous, Inspect Manually?")
-          if fc == 6: #weak
-               pdict['warnings'].append("WEAK")
-               report.append("Weak Density, likely noise peak")
-          if fc == 7: #remote
-               pdict['warnings'].append("REMOTE")
-               if pdict['anchor']['model'] == 3:
-                    report.append("REMOTE, connected to MM by %s" % pdict['anchor']['resat'])
-               else:
-                    report.append("REMOTE, no connection to MM")
-
-          if edc == 0:
-               report.append("Junk/Noise")
-          return report
-
-     def clust_rep(self,pdict):
-          pdata=pdict['proc_data']
-          pmf = pdata['mf']
-          rep_str = []
-          if pmf == 1:
-               rep_str.append("None")
-          if pmf == 2:
-               rep_str.append("Large Cluster --> unmodelled ligand?")
-               rep_str.append("List of associated peaks:")
-               rep_str.append("   "+" ".join(pdict['sat_peaks']))
-          if pmf == 3 or pmf == 4:
-               rep_str.append("Cluster --> principal peak")
-               rep_str.append("List of satellite peaks:")
-               rep_str.append("   "+" ".join(pdict['sat_peaks']))
-          if pmf == 5:
-               rep_str.append("Satellite Peak:")
-               rep_str.append("Possible associations:")
-               rep_str.append("   "+" ".join(pdict['sat_peaks']))
-
-          return rep_str
-
-     def score_report(self,pdict,resid_names):
-          preds = pdict['pred_data']
-          probs = pdict['prob_data']
-          pdata = pdict['proc_data']
-          ambig = pdict['ambig']
-          pick1 = pdict['pick']
-          pick_name = pdict['pick_name']
-          peakid = pdict['db_id']
-          score_rep = {}
-          lstr_outputs = []
-          sstr_outputs = []
-          p1 = " ".join(" %3.1f" % x for x in probs[0])
-          p2 = " ".join(" %3.1f" % x for x in probs[1])
-          p3 = " ".join(" %3.1f" % x for x in probs[2])
-          lstr_outputs.append("Known_Classes:          %s" % "  ".join(resid_names))
-          lstr_outputs.append("Class_prob_flat_prior   %s" % p1 )
-          lstr_outputs.append("Class_prob_bias_prior   %s" % p2 )
-          lstr_outputs.append("Class_prob_popc_prior   %s" % p3 )
-          lstr_outputs.append("Peak Predicted to be: %s Ambig: %s" % (resid_names[pick1-1],ambig))
-          sstr_outputs.append("P1: %s |P2: %s |P3: %s " % (p1,p2,p3))
-          pdict['score_lstr'] = lstr_outputs
-          pdict['score_sstr'] = sstr_outputs
 
      def initial_report(self,peak_features):
           #for peak data output during feature extraction
@@ -452,224 +300,3 @@ class DataIO:
                                                                               cl_peak_out,cl_mod_out,cl_sol_out)
           return outstr
 
-     def peak_report(self,pdict):
-          all_peak_db = pdict['peak_unal_db']
-          if pdict['status'] in [6,]:
-               print "PEAK %s Status: %s UNPROCESSED " % (pdict['db_id'],pdict['status'])
-               return
-          resid_names = pdict['resid_names']
-          peakid = pdict['db_id']
-          unal = pdict['unal']
-          #if 'pred_data' not in pdict.keys() or pdict['status'] in [1,3,6,7]:
-          #     return " %s NOPROC" % pdict['db_id']
-          preds = pdict['pred_data']
-          probs = pdict['prob_data']
-          pdata = pdict['proc_data']
-          #self.model_error(peakid,peak_db)
-          self.score_report(pdict,resid_names)
-          ambig = pdict['ambig']
-          pick1 = pdict['pick']
-          pick_name = pdict['pick_name']
-          mflag = pdict['mflag']
-          label = pdict['label']
-
-          to_output = {"pscore":False,"mscore":False,'p_as_lab':False,"m_as_lab":False,
-                       "clust_rep":False,"contact_rep":True,"model_rep":True}
-
-          #first, status -- process error or sigma rejected
-          if pdict['status'] not in [1,3,6,7]:
-               to_output['pscore'] = True
-
-          #next, look at contact situation:
-          contact_report = self.contact_rep(pdict)
-          if len(contact_report) == 0:
-               to_output['contact_rep'] = False
-          if pdata['fc'] == 2:
-               to_output['model_rep'] = False
-
-          #modeled solvent report
-          model_report = self.model_rep(pdict)
-
-
-          if mflag in [2,3,5,6,7]:
-               to_output['p_as_lab'] = True
-               probs_peak_as_label = " ".join("%3.2f" % x for x in probs[:,label-1])
-
-          if pdata['mf'] in [2,3,4,5]:
-               to_output['clust_rep'] = True
-               clust_rep = self.clust_rep(pdict)
-          
-          #look at model peak
-          if mflag in [2,3,5,6,7]:
-               best_sol = all_peak_db[pdict['sol_mod'][0][0]]
-               mpeak_legit = best_sol['status'] not in [1,3,4,6,7]
-               if mpeak_legit:
-                    self.score_report(best_sol,resid_names)
-                    m_probs = best_sol['prob_data']
-                    m_ambig = best_sol['ambig']
-                    m_pick1 = best_sol['pick']
-                    m_pick_name = best_sol['pick_name']
-                    m_mflag = best_sol['mflag']
-                    m_label = best_sol['label']
-                    if m_label > 0:
-                         to_output['m_as_lab'] = True
-                         probs_model_as_label = " ".join("%3.2f" % x for x in m_probs[:,m_label-1])
-                    to_output['mscore'] = True
-               else:
-                    best_sol = {}
-                    best_sol['pick'] = 0
-                    m_probs = np.zeros((3,4))
-                    m_ambig = False
-                    m_pick1 = 0
-                    m_pick_name = "XXX"
-                    probs_model_as_label = ""
-
-
-          #DATA FOR OUTPUT
-          fsig =  pdata['fofc_sigo']
-          f2sig = pdata['2fofc_sigo']
-          scr =  pdata['score']
-          cscr = pdata['cscore']
-          edc = pdata['edc']
-          cc = pdata['cc']
-          mf = pdata['mf']
-          srchi = (pdata['chiS'] + pdata['cchiS'])/15.0
-          wrchi = (pdata['chiW'] + pdata['cchiW'])/15.0
-          peak_status = pdict['status']
-          prob = pdata['prob']
-          cdist = pdict['c1']
-          ori = pdict['orires']
-          p1 = " ".join(" %3.1f" % x for x in probs[0])
-          p2 = " ".join(" %3.1f" % x for x in probs[1])
-          p3 = " ".join(" %3.1f" % x for x in probs[2])
-          status = pdict['status']
-          anc_resat = pdict['anchor']['resat']
-          adist = pdict['anchor']['distance']
-          #contacts
-          #original model
-          clori = pdict['contacts'][0]
-          #existing solvent
-          clsol = pdict['sol_contacts'][0]
-          #macromolecule
-          clmac = pdict['mm_contacts'][0]
-          #other peaks, 0 is self?
-          clpeak = pdict['peak_contacts'][0]
-          if clpeak['resname'] == "NUL":
-               pcout = "None"
-          else:
-               pcout = "%2.1fA" % clpeak['distance']
-
-          op = "NONE"
-
-          if pdata['fc'] == 1:
-               peak_spl = "Yes"
-               pdict['warnings'].append("Spl_Pos")
-               op = op+" (SPECIAL POSITION!)"
-          elif pdata['mf'] == 6:
-               peak_spl = "Maybe"
-               pdict['warnings'].append("Near_Spl_Pos")
-               op = op+" (NEAR SPECIAL POSITION!)"
-          else:
-               peak_spl = "No"
-
-
-          if pdata['mf'] == 1:
-               peak_clust = "No"
-          elif pdata['mf'] == 6:
-               peak_clust = "Unknown"
-          else:
-               peak_clust = "Yes"
-          clust_sat_short = []
-          for peak in pdict['sat_peaks']:
-               if peak != peakid:
-                    clust_sat_short.append(peak)
-          num_sat = len(clust_sat_short)
-
-
-          cls = "".join("%s" % x for x in [pdata['fc'],pdata['rc'],pdata['edc'],pdata['cc'],pdata['mf']])
-          tally = "".join("%s" % x for x in [pdata['ol'],pdata['om'],pdata['oh'],pdata['wl'],pdata['wm'],pdata['wt'],
-                                             pdata['sl'],pdata['sm'],pdata['st'],pdata['sp']])
-          allflag = self.report_flags(pdata,resid_names[pick1-1],ambig)
-
-          if len(pdict['warnings']) > 1:
-               all_warn = "Warnings: %s" % " ".join(pdict['warnings'])
-          else:
-               all_warn = ""
-          print "PEAK %s Status: %s Flags: %s %s %s %s" % (peakid,pdict['status'],cls,all_warn,str(pdata['prob'])[0:5],str(pdict['c1'])[0:5])
-          print "   ED:  FoFc %5.2f 2FoFc %5.2f ED_score %4.1f ED_class %s" % (fsig,f2sig,scr,edc)
-          print "   ENV: Contact_score %4.1f Contact_class %s" % (cscr,cc)
-          print "        CONTACTS Closest: %2.1fA %s  MacMol: %2.1fA %s Other_Peaks: %s" % (clori['distance'],clori['resat'],clmac['distance'],clmac['resat'],pcout)
-          print "        -- Clash: %s   Special: %s   Cluster: %s  FC: %s" % (pdata['wt'],peak_spl,peak_clust,pdata['fc'])
-          if to_output['contact_rep']:
-               print self.rep_print(contact_report,12)
-
-          print "   PEAK ANALYSIS:"
-          if to_output['model_rep']:
-               print self.rep_print(model_report,12)
-          if to_output['pscore']:
-               print "      Scoring:"
-               print "         Peak %s from PeakProbe:" % pdict['db_id']
-               print self.rep_print(pdict['score_lstr'],12)
-               if to_output['p_as_lab']:
-                    print "               Probs for %s as %s: %s"% (peakid,resid_names[label-1],probs_peak_as_label)
-          if to_output['mscore']:
-               print "         Peak %s from Input Model (%2.1fA away):" % (clsol['resat'],clsol['distance'])
-               print self.rep_print(best_sol['score_lstr'],12)
-          if to_output['m_as_lab']:
-               print "               Probs for %s as %s: %s" % (clsol['resat'],resid_names[m_label-1],probs_model_as_label)
-          if to_output['clust_rep']:
-               print "CLUSTER REPORT mf %d" % pdata['mf']
-               print self.rep_print(clust_rep,12)
-          print "   VERDICT: %s" % op
-
-          flags = self.report_flags(pdata,pick_name,ambig=ambig)
-          flagstr = " ".join(flags)
-          fmtstr = ('{:>12} SCR {:5.1f} {:5.1f} P_nw {:3.2f} C1 {:3.2f}A {:>12} C{:5} STAT {:4d} || M/P {:>3} {:>3} ||'
-                    'P1: {} |P2: {} |P3: {} || {}')
-          
-          outstr = fmtstr.format(peakid,scr,cscr,prob,adist,anc_resat,cls,status,ori,pick_name,p1,p2,p3,flagstr)
-          print "SHORT",outstr
-          return "DONE"
-
-
-
-     def rep_print(self,str_list,indent):
-          outst_list = []
-          for string in str_list:
-               outst_list.append(" "*indent+string)
-          return "\n".join(outst_list)
-
-
-     def report_flags(self,peak,pred,ambig=False):
-          flags = []
-          if peak['fc'] == 1:
-               flags.append('SPL')
-          if peak['fc'] == 2 or peak['fc'] == 3:
-               flags.append('CLASH')
-          if peak['fc'] == 3:
-               flags.append('CLASH')
-          if peak['fc'] == 4:
-               flags.append('BUMP')
-          if peak['fc'] == 5:
-               flags.append('BUMP')
-          if peak['fc'] == 6:
-               flags.append('WEAK')
-          if peak['fc'] == 7:
-               flags.append('REMOTE')
-          if peak['mf'] > 1 and peak['mf'] < 6:
-               flags.append('CLUST')
-          #if peak['mf'] == 6:
-          #     flags.append('SELF')
-          if pred == "HOH":
-               if peak['edc'] < 5 or peak['cc'] < 5:
-                    flags.append('BADW')
-               if peak['rc'] < 7:
-                    flags.append('CHIW')
-          if pred == "SO4":
-               if peak['edc'] > 4 or peak['cc'] > 4:
-                    flags.append('BADS')
-               if peak['rc'] > 3:
-                    flags.append('CHIS')
-          if ambig:
-               flags.append('AMBIG')
-          return flags

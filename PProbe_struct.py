@@ -244,3 +244,11 @@ class StructData:
         return std_wat_pdb,std_wat_hier,std_wat_xrs
 
             
+    def gen_null_peak(self):     
+        record = self.pput.write_atom(0,"O","","NUL","P",0,"",999.99,999.99,999.99,0.0,30.0,"O","")
+        
+        tmp_hier = iotbx.pdb.input(source_info=None,lines=flex.split_lines(record))
+        pdb_str = tmp_hier.as_pdb_string(crystal_symmetry=self.orig_symmetry)
+        null_input=iotbx.pdb.input(source_info=None,lines=flex.split_lines(pdb_str))
+        null_hier = null_input.construct_hierarchy()
+        return null_hier

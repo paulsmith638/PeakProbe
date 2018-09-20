@@ -56,17 +56,19 @@ class FeatureExtraction:
                                           resat = resname+"_"+ori_chain+ori_resid+"_"+name
                                           db_id = pput.gen_db_id(pdb_code,out_chain,out_resid)
                                           unat,unal,unrg = pput.gen_unids(awl,model=model_id)
-                                          peak_list.append(dict(db_id=db_id,
-                                                                model=model_id,
-                                                                resid=out_resid,
-                                                                chainid=out_chain,
-                                                                coord=coord,
-                                                                unat=unat,
-                                                                unal=unal,
-                                                                unrg=unrg,
-                                                                ori_chain=ori_chain,
-                                                                ori_resid=ori_resid,
-                                                                resat=resat))
+                                          pdict = self.gen_pdict()
+                                          pdict["db_id"] = db_id
+                                          pdict["model"] = model_id
+                                          pdict["resid"]=out_resid
+                                          pdict["chainid"]=out_chain
+                                          pdict["coord"]=coord
+                                          pdict["unat"]=unat
+                                          pdict["unal"]=unal
+                                          pdict["unrg"]=unrg
+                                          pdict["ori_chain"]=ori_chain
+                                          pdict["ori_resid"]=ori_resid
+                                          pdict["resat"]=resat
+                                          peak_list.append(pdict)
             return peak_list
 
 
@@ -112,3 +114,130 @@ class FeatureExtraction:
             features['dmove'] = np.linalg.norm(np.subtract(new_coord,(5.0,5.0,5.0)))
 
 
+      def gen_pdict(self):
+            #initializes a dictionary with default values for a pdict
+            #not all peaks use all values
+            #many are copied to/from numpy
+            #default values are assigned and reflect expected types
+            pdict_proto = {"2fofc_sig_in":0.0 ,
+                           "2fofc_sigo_scaled":0.0,
+                           "2fofc_sig_out":0.0,
+                           "ambig":0,
+                           "anc_cont":[],
+                           "anc_for":[],
+                           "anchor":{},
+                           "batch":0,
+                           "bin":0,
+                           "c1":0.0,
+                           "cc":0,
+                           "cchiS":0.0,
+                           "cchiW":0.0,
+                           "chainid":"",
+                           "charge":0.0,
+                           "chiS":0.0,
+                           "chiW":0.0,
+                           "clash":False,
+                           "cllgS":0.0,
+                           "cllgW":0.0,
+                           "clust_cent":0.0,
+                           "clust_mem":[],
+                           "clust_pair":[],
+                           "clust_rank":0,
+                           "clust_score":0,
+                           "contacts":[],
+                           "cont_db":{},
+                           "coord":(0.0,0.0,0.0),
+                           "cscore":0.0,
+                           "db_id":"",
+                           "dmove":0.0,
+                           "edc":0,
+                           "fc":0,
+                           "filter_mask":[0,0,0,0],
+                           "fofc_sig_in":0.0,
+                           "fofc_sigo_scaled":0.0,
+                           "fofc_sig_out":0.0,
+                           "label":0,
+                           "llgS":0.0,
+                           "llgW":0.0,
+                           "master_dict":{},
+                           "mf":0,
+                           "mflag":0,
+                           "mm_contacts":[],
+                           "mod_cont":[],
+                           "model":0,
+                           "modexp_clust":[],
+                           "mod_for":[],
+                           "oh":0,
+                           "ol":0,
+                           "om":0,
+                           "omit":0,
+                           "omit_contacts":[],
+                           "ori_chain":"",
+                           "orires":"",
+                           "ori_resid":"",
+                           "pdb_code":"",
+                           "peak_contacts":[],
+                           "peak_unal_db":{},
+                           "pick":0,
+                           "pick_name":"",
+                           "prob":0.0,
+                           "prob_data":np.zeros((3,4)),
+                           "ptype":"",
+                           "rc":0,
+                           "resat":"",
+                           "resid":"",
+                           "resid":0,
+                           "resolution":"",
+                           "resolution":0.0,
+                           "s_contacts":[],
+                           "score":0.0,
+                           "scr1":0.0,
+                           "scr2":0.0,
+                           "scr3":0.0,
+                           "sl":0,
+                           "sm":0,
+                           "so4_2fofc_mean_cc60":0.0,
+                           "so4_2fofc_ref_oricoords":list(("X",(0.0,0.0,0.0)) for i in range(5)),
+                           "so4_2fofc_stdev_cc60":0.0,
+                           "so4_cc_2fofc_in":0.0,
+                           "so4_cc_2fofc_inv_in":0.0,
+                           "so4_cc_2fofc_inv_out":0.0,
+                           "so4_cc_2fofc_inv_rev":0.0,
+                           "so4_cc_2fofc_out":0.0,
+                           "so4_cc_fofc_in":0.0,
+                           "so4_cc_fofc_inv_in":0.0,
+                           "so4_cc_fofc_inv_out":0.0,
+                           "so4_cc_fofc_inv_rev":0.0,
+                           "so4_cc_fofc_out":0.0,
+                           "so4_fofc_coord_out":(),
+                           "so4_fofc_mean_cc60":0.0,
+                           "so4_fofc_stdev_cc60":0.0,
+                           "solc":0.0,
+                           "sol_contacts":[],
+                           "sol_mod":[],
+                           "sp":0,
+                           "st":0,
+                           "status":-1,
+                           "strip_contacts":[],
+                           "tflag":0,
+                           "unal":0,
+                           "unat":0,
+                           "unrg":0,
+                           "vol_2fofc":0.0,
+                           "vol_fofc":0.0,
+                           "warnings":[],
+                           "wat_2fofc_ref_oricoords":(),
+                           "wat_cc_2fofc_in":0.0,
+                           "wat_cc_2fofc_inv":0.0,
+                           "wat_cc_2fofc_out":0.0,
+                           "wat_cc_fofc_in":0.0,
+                           "wat_cc_fofc_inv":0.0,
+                           "wat_cc_fofc_out":0.0,
+                           "wat_fofc_coord_out":(),
+                           "w_contacts":[],
+                           "wl":0,
+                           "wm":0,
+                           "worst_mm":{},
+                           "wt":0}
+            
+            return pdict_proto

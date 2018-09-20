@@ -12,6 +12,7 @@ np.set_printoptions(suppress=True)
 np.set_printoptions(linewidth=1e6, edgeitems=1e6)
 import sqlite3 as lite
 import matplotlib as mpl
+mpl.rcParams.update({'font.size': 16})
 mpl.use('TkAgg')
 import matplotlib.pyplot as plt
 from PProbe_classify import ClassifierFunctions
@@ -51,7 +52,7 @@ class TrainingFunctions:
           self.peak_edc = ppcf.peak_edc
           self.peak_fc = ppcf.peak_fc
           self.peak_cc = ppcf.peak_cc
-          self.ppsel = ppcf.ppsel #inherit imported class?
+          self.ppsel = ppcf.ppsel 
 
           #option for speedup for code testing
           self.fastmode = fastmode
@@ -662,7 +663,7 @@ class TrainingFunctions:
                wfit_list.append(wfit)
                res_list.append(np.nanmean(data_array['res'],dtype=np.float64))
 
-               if plot: 
+               if plot:
                     xdata=np.linspace(np.amin((slow,wlow))-1.0,np.amax((shigh,whigh))+1.0,100)
                     sub = gridplot.add_subplot(4,5,index+1)
                     splot_bins = obss_hist.shape[0]
@@ -670,7 +671,7 @@ class TrainingFunctions:
                     sub.plot(xdata,self.johnsonsu_pdf(xdata,sfit[0],sfit[1],sfit[2],sfit[3]),'r-')
                     sub.plot(xdata,self.johnsonsu_pdf(xdata,wfit[0],wfit[1],wfit[2],wfit[3]),'b-')
                     sub.hist(input_column[obss_sel], normed=True, bins=splot_bins,range=(slow,shigh),color="red",alpha=0.5)
-                    sub.hist(input_column[obsw_sel], normed=True, bins=wplot_bins,range=(wlow,whigh),color="blue",alpha=0.5,)
+                    sub.hist(input_column[obsw_sel], normed=True, bins=wplot_bins,range=(wlow,whigh),color="blue",alpha=0.5)
                     sub.text(0.2,0.8,"%s" % column,verticalalignment='bottom',horizontalalignment='right',
                              transform=sub.transAxes,fontsize=12)
                     sstat = self.johnsonsu_stats(sfit)
@@ -826,22 +827,24 @@ class TrainingFunctions:
                     sub = gridplot.add_subplot(2,1,index+1)
                     splot_bins = obss_hist.shape[0]
                     wplot_bins = obsw_hist.shape[0]
-                    sub.plot(xdata,self.johnsonsu_pdf(xdata,sfit[0],sfit[1],sfit[2],sfit[3]),'r-')
-                    sub.plot(xdata,self.johnsonsu_pdf(xdata,wfit[0],wfit[1],wfit[2],wfit[3]),'b-')
+                    sfit_model = self.johnsonsu_pdf(xdata,sfit[0],sfit[1],sfit[2],sfit[3])
+                    wfit_model = self.johnsonsu_pdf(xdata,wfit[0],wfit[1],wfit[2],wfit[3])
+                    sub.plot(xdata,sfit_model,'r-')
+                    sub.plot(xdata,wfit_model,'b-')
                     sub.hist(input_column[col_ssel], normed=True, bins=splot_bins,color="red",alpha=0.5)
                     sub.hist(input_column[col_wsel], normed=True, bins=wplot_bins,color="blue",alpha=0.5)
-                    sub.text(0.2,0.95,"%s" % column,verticalalignment='bottom',horizontalalignment='right',
+                    sub.text(0.2,0.90,"%s" % column,verticalalignment='bottom',horizontalalignment='right',
                              transform=sub.transAxes,fontsize=12)
                     #sub.plot(xdata,self.norm_pdf(xdata))
                     sstat = self.johnsonsu_stats(sfit)
                     wstat = self.johnsonsu_stats(wfit)
-                    sub.text(0.99,0.95,"%.1f %.2f" % (sstat[0],np.sqrt(sstat[1])),verticalalignment='bottom',
+                    sub.text(0.99,0.94,"%.1f %.2f" % (sstat[0],np.sqrt(sstat[1])),verticalalignment='bottom',
+                             horizontalalignment='right',transform=sub.transAxes,fontsize=12,color='red')
+                    sub.text(0.99,0.90,"%.1f %.2f" % (wstat[0],np.sqrt(wstat[1])),verticalalignment='bottom',
+                             horizontalalignment='right',transform=sub.transAxes,fontsize=12,color='blue')
+                    sub.text(0.99,0.85,"%.2f %.2f %.2f %.2f" % tuple(sfit),verticalalignment='bottom',
                              horizontalalignment='right',transform=sub.transAxes,fontsize=10,color='red')
-                    sub.text(0.99,0.92,"%.1f %.2f" % (wstat[0],np.sqrt(wstat[1])),verticalalignment='bottom',
-                             horizontalalignment='right',transform=sub.transAxes,fontsize=10,color='blue')
-                    sub.text(0.99,0.86,"%.2f %.2f %.2f %.2f" % tuple(sfit),verticalalignment='bottom',
-                             horizontalalignment='right',transform=sub.transAxes,fontsize=10,color='red')
-                    sub.text(0.99,0.83,"%.2f %.2f %.2f %.2f" % tuple(wfit),verticalalignment='bottom',
+                    sub.text(0.99,0.80,"%.2f %.2f %.2f %.2f" % tuple(wfit),verticalalignment='bottom',
                              horizontalalignment='right',transform=sub.transAxes,fontsize=10,color='blue')
           if plot:
                plt_str = "contacts"

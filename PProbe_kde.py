@@ -4,7 +4,6 @@ np.set_printoptions(precision=5)
 np.set_printoptions(suppress=True)
 np.set_printoptions(linewidth=1e6, edgeitems=1e6)
 if 'matplotlib' not in sys.modules:
-
      mpl.use('Agg')
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -13,6 +12,7 @@ from PProbe_dataio import DataIO
 from PProbe_selectors import Selectors
 from PProbe_stats import StatFunc
 from PProbe_util import Util
+from PProbe_filter import Filters
 from matplotlib import cm
 
 
@@ -21,6 +21,8 @@ class KDE:
           self.verbose = verbose
           self.ppio = DataIO(phenix_python=False)
           self.pput = Util()
+          self.ppfilt = Filters(verbose=verbose)
+          self.ppstat = StatFunc()
           mdict = master_dictionary
           if train == False:
                self.kdedict = mdict['kde']
@@ -51,6 +53,7 @@ class KDE:
           all_joint[:,:,-1] = np.nansum(all_joint[:,:,0:-1],axis=2)
           return all_joint
 
+
      def kde_label(self,data_array):
           #label dataset for training / scoring
           #current class labels are
@@ -61,10 +64,8 @@ class KDE:
           selectors = Selectors(data_array)
           labs = selectors.inc_obss_bool
           labw = selectors.inc_obsw_bool
-          oth_labels = ['DTT','MAL','EOH','SUC','SCN','P6G','GSH','CO3','CIT','BOG',
-                        'NO3','IMD','BME','ACY','PGE','PG4','TRS','MPD','DMS','PEG',
-                        'ACT','EDO','GOL',' CL',' BR']
-          met_labels = [' MG',' CA',' ZN',' MN',' NI',' CD',' CO',' FE']
+          oth_labels = self.ppio.common_oth
+          met_labels = self.ppio.common_met
           laboth = np.zeros(data_array.shape[0],dtype=np.bool_)
           for residue in oth_labels:
                laboth = np.logical_or(laboth,(data_array['ori'] == residue))
@@ -204,23 +205,6 @@ class KDE:
                llA[:,pind] = np.log(lA) - llXY
           return llA[:,0:4]
 
-
-
-
-     def cmatrix(self,label,pred):
-          #confusion matrix for scoring
-          #expects integer >= 1 for label/pred
-          max_lind = np.amax(label)
-          max_pind = np.amax(pred)
-          max_all = max(max_lind,max_pind)+1
-          cmatrix = np.zeros((max_all,max_all))
-          for i in np.arange(1,max_all,1):
-               for j in np.arange(1,max_all,1):
-                    cmatrix[i,j] = np.count_nonzero(np.logical_and(label==i,pred==j))
-          cmatrix[:,0] = np.nansum(cmatrix,axis=1)
-          cmatrix[0,:] = np.nansum(cmatrix,axis=0)
-          return cmatrix
-
      def predict_kde(self,prob_array):
           #i=1 numbering for each in populations
           pred_arr = np.zeros(prob_array.shape,dtype=np.int8)
@@ -234,63 +218,68 @@ class KDE:
           kdedict = self.kdedict
           resid_names = kdedict['populations']
           features = kdedict['features']
-          prior_list = [self.flat_prior,self.dir_prior,self.flat_prior] #flat used twice, updated
+          prior_list = [self.flat_prior,self.dir_prior,self.dir_prior] #last is updated below
           prob_arr = np.zeros((data_array.shape[0],len(prior_list),len(resid_names)))
           for priorind in range(len(prior_list)):
                prior = prior_list[priorind]
                prob_arr[:,priorind,:] = self.kde_grid_prob('score','cscore',data_array['score'],data_array['cscore'],prior)
 
-
           #assign structure specific probabilities based on empirical prior
           #start from flat prior, update counts (3 iterations is well converged)
+          #use only if sufficient peaks available
           pput = self.pput
           pdbid_hash = pput.index_by_pdb(data_array)
           for pdbid,pdbind in pdbid_hash.iteritems():
                datain = data_array[pdbind]
+               if datain.shape[0] < 20:
+                    break
                for i in range(3):
-                    #update prior based on counts within a structure
-                    #starting from flat prior
                     probin = prob_arr[pdbind,2,:]
-                    predin = np.argmax(probin,axis=1) + 1
-                    psort = np.sort(probin,axis=1)
-                    diff = psort[:,-1] - psort[:,-2]
-                    #print diff
-                    schi = np.add(datain['chiS'],datain['cchiS'])
-                    wchi = np.add(datain['chiW'],datain['cchiW'])
-                    #set stringent criteria for observing in population
-                    all_good = np.logical_and(datain['fc'] == 0,datain['edc'] > 0)
-                    strong = diff > 10.0
-                    #all_good = np.logical_and(all_good,strong)
-                    not_w = datain['prob'] > 0.8
-                    good_s = np.logical_and(datain['llgS'] > 0,not_w)
-                    good_w = np.logical_and(datain['llgW'] > 0,np.invert(not_w))
-                    mismatch = np.logical_or(np.logical_and(not_w,schi > 30.0),np.logical_and(good_w,wchi < 25.0))
-                    valid_w = np.logical_and(predin == 1,np.logical_and(good_w,wchi < 35.0))
-                    valid_s = np.logical_and(predin == 2,np.logical_and(good_s,schi < 35.0))
-                    valid_o = np.logical_and(predin == 3,np.logical_and(strong,wchi > 25.0))
-                    valid_m = np.logical_and(predin == 4,np.logical_and(strong,schi < 25.0))
-                    vgw = np.logical_and(all_good,valid_w)
-                    vgs = np.logical_and(all_good,valid_s)
-                    vgo = np.logical_and(all_good,valid_o)
-                    vgm = np.logical_and(all_good,valid_m)
-                    #print "PCOUNT",list(np.count_nonzero(x) for x in [vgw,vgs,vgo,vgm])
-                    valid = np.logical_or(vgw,np.logical_or(vgs,np.logical_or(vgo,vgm)))
-                    counts = []
-                    for predlab in range(len(resid_names)):
-                         count_mask = np.logical_and(predin==predlab+1,valid)
-                         count_ids = set(datain['id'][count_mask])
-                         #counts.append(len(count_ids))
-                         counts.append(np.count_nonzero(count_mask))
-                    #counts of each population + 1 (additive smoothing / dirichlet with alpha=1)
-                    countin = np.array(counts,dtype=np.float32)
-                    alpha= (countin+1.0)/(np.nansum(countin)+len(resid_names))
+                    alpha,counts = self.calc_pdb_prior(datain,probin)
+                    if np.nansum(counts) < 20:
+                         break
+                    alpha_str = " ".join(list("%4.3f" % x for x in alpha))
                     prob_arr[pdbind,2,:] = self.kde_grid_prob('score','cscore',datain['score'],datain['cscore'],alpha)
-                    if i == 2 and self.verbose:
+                    if i == 2 and self.verbose: #last cycle, print out counts and prior
                          outlist = [pdbid,i+1,len(pdbind),resid_names[0],counts[0],resid_names[1],counts[1],
-                                    resid_names[2],counts[2],resid_names[3],counts[3]]
-                         print "     PDB %4s Cycle %1d POPCOUNT (%5d): %3s %5d %3s %5d %3s %5d %3s %5d" % tuple(outlist)
+                                    resid_names[2],counts[2],resid_names[3],counts[3],alpha_str]
+                         print "     PDB %4s Cycle %1d POPCOUNT (%5d): %3s %5d %3s %5d %3s %5d %3s %5d %s" % tuple(outlist)
           return prob_arr
 
+     def calc_pdb_prior(self,datain,probin):
+          #calculate a prior for a given structure based on counts of good hits
+          #data in is numpy for a single structure
+          #probin is third prior prob est (initially from flat prior)
+          #omit list in np indices for peaks not to consider (rej,sat,suspicious,etc.)
+          omit_mask = np.logical_and(datain['mf'] % 10 > 1,datain['fc'] == 0)
+
+          
+          #print "Excluding %s peaks from Bayes update!" % np.count_nonzero(omit_mask)
+          datain = datain[np.invert(omit_mask)]
+          filter_mask = self.ppfilt.feat_filt(datain)
+          probin = probin[np.invert(omit_mask),:]
+          argpick = np.argmax(probin,axis=1)
+          pick_prob = np.sort(probin,axis=1)[:,-1]
+          predin = argpick + 1        
+          #set stringent criteria for observing in population
+          good_wso = np.logical_and(datain['fc'] == 0,datain['edc'] > 0) #real wso always
+          good_som = datain['prob'] > 0.8
+          #metals can have close contacts, but never far
+          good_m = np.logical_and(datain['fc'] != 1,np.logical_and(datain['fc'] != 2,datain['c1'] < 3.1)) 
+          good_score = pick_prob > -1.0 #good picks have positivish llg scores
+          all_good = np.logical_and(good_wso,good_score)
+          vgw = np.logical_and(predin == 1,np.logical_and(filter_mask[:,0] < 7,datain['prob'] < 0.1))
+          vgs = np.logical_and(predin == 2,np.logical_and(filter_mask[:,1] < 7,good_som))
+          vgo = np.logical_and(predin == 3,np.logical_and(filter_mask[:,2] < 7,good_som))
+          vgm = np.logical_and(predin == 4,np.logical_and(good_score,np.logical_and(filter_mask[:,3] < 10,good_m)))
+          counts = []
+          for pop in [vgw,vgs,vgo,vgm]:
+               count_ids = set(datain['id'][pop])
+               counts.append(len(count_ids)) #only one count per residue (training)
+          #counts of each population + 1 (additive smoothing / dirichlet with alpha=1)
+          countin = np.array(counts,dtype=np.float32)
+          alpha= (countin+1.0)/(np.nansum(countin)+len(self.populations))
+          return alpha,counts #new prior
 
 
      def gen_plot_hist(self,features=None,prior=None):
@@ -420,6 +409,7 @@ class KDE:
                d2 = cscore[sel]
                pno1 = pno[sel]
                sub.scatter(d1,d2,s=300,marker="$%s$" % bi ,cmap=cmapper)
-          plt.savefig(outstr+"_hist_plot.png")
+          print "   Plotting data on 2D grid %s_plot.png" % outstr
+          plt.savefig(outstr+"_plot.png")
           plt.clf()
           plt.close()

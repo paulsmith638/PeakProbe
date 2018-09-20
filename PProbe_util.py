@@ -70,7 +70,6 @@ class Util:
             return record
 
 
-
       def index_by_pdb(self,data_array):
             #grab a single pdb a large dataset (useful for cluster analysis)
             #uses the 1st 4 characters of dbid.
@@ -110,3 +109,13 @@ class Util:
       def scale_density(self,sigma,solc):
             return sigma/np.sqrt(1.0-solc)
 
+      def pick_from_prob(self,kde_probs):
+            preds = np.argsort(kde_probs,axis=1)[:,::-1]+1
+            tally = np.bincount(preds[:,0],minlength=5)
+            pick1 = np.argmax(tally)
+            if tally[pick1] == 1: #each prior picks a different pick
+                  best_scores = np.sort(kde_probs,axis=1)[:,::-1]
+                  best_prior = np.argmax(best_scores[:,0])
+                  pick1 = np.argmax(kde_probs[best_prior,:])+1
+                  #print "PRIOR AMBIG",kde_probs[0],kde_probs[1],kde_probs[2],best_prior,pick1
+            return pick1

@@ -65,11 +65,8 @@ class Selectors:
      def setup_masks(self,raw_data):
           #selects all that is not XXX
           original_residue = np.core.defchararray.strip(raw_data['ori'])
-          self.sw_bool = np.invert(original_residue == "XXX")
           #selects sulfate, then phosphate, then combines
-          self.obss_bool = original_residue == 'SO4'
-          self.obsp_bool = original_residue == 'PO4'
-          self.obss_bool = np.logical_or(self.obss_bool,self.obsp_bool)
+          self.obss_bool = np.logical_or(original_residue == "SO4",original_residue == "PO4")
           #selects water
           self.obsw_bool = original_residue == 'HOH'
           #selects data flagged for omit, bad structures, etc.
