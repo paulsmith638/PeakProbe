@@ -749,8 +749,6 @@ class Contacts:
       def associate_models(self,all_peak_db,peak_list,sol_list):
             #for input of all peaks, associate model 3 (solvent) with model 4 (peaks)
             #by auctions and associate based on lowest distances
-
-
             #start with setting up peaks with pruned solvent contacts, skip those with none
             for unal in peak_list:
                   pdict = all_peak_db[unal]

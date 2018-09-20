@@ -4,7 +4,7 @@ import numpy as np
 
 class PhenixTasks:
     #tasks requiring cctbx, run under "phenix.python"
-    def __init__(self,cmdline=False,phenix_params=False):
+    def __init__(self,phenix_params=None):
         #cctbx imports
         global iotbx,phil,flex,reflection_file_utils,crystal_symmetry_from_any,Sorry,easy_pickle
         import iotbx.pdb 
@@ -31,57 +31,47 @@ class PhenixTasks:
         self.ppcont = PPcont(phenix_python=True)
 
         #we need one or the other
-        assert cmdline or phenix_params
+        assert phenix_params is not None
         #setup some dev options
         self.dev_opts = {'set_chain':False,'pdb_out_str':"",
                          'renumber':False,'write_ref_pdb':False,
                          'write_maps':False,'ressig':False,
                          'write_contacts':False,'proc_sol':True}
 
-        #command line expects 5 args as listlike (NB: filenames) 
-        #   resolution,input_pdb,input_strip_pdb,peaks_pdb,input_map_mtz 
-        #   output_code is optional
         #phenix params should be a file formatted by phil
         #should be processed properly by phil . . . 
-        if cmdline:
-            self.score_res,self.model_pdb,self.strip_pdb,self.peaks_pdb,self.map_coeff = cmdline[0:5]
-            if len(cmdline) == 6:
-                if len(cmdline[5]) > 3:
-                    self.out_prefix = cmdline[5]
-            else:
-                self.out_prefix = 'user'
-            self.phe_par = None
-            self.cmdline = " ".join(par for par in cmdline)
-        if phenix_params:
-            phil_f = open(phenix_params,'r')
-            phil_str = phil_f.read()
-            phil_f.close()
-            pprobe_phil = phil.parse(phil_str)
-            self.phe_par = pprobe_phil.extract()
-            extract_asstr = self.phe_par.pprobe.extract[0]
-            extract = extract_asstr[0].lower() == "t"
-            if extract:
-                self.model_pdb = self.phe_par.input.pdb.model_pdb[0]
-                self.strip_pdb = self.phe_par.input.pdb.strip_pdb[0]
-                self.peaks_pdb = self.phe_par.input.pdb.peaks_pdb[0]
-                self.map_coeff = self.phe_par.input.input_map.map_coeff_file[0]
-            mdict_file = self.phe_par.input.model_param.model_dict_file[0]
-            self.master_dict = self.ppio.read_master_dict(input_dfile=mdict_file)
-            scres = self.phe_par.input.parameters.score_res
-            if scres is not None:
-                self.score_res = self.phe_par.input.parameters.score_res[0]
-            self.out_prefix  = self.phe_par.output.output_peak_prefix[0][0:4]
-            # I can't figure out this phil parse thing, so bad hack here
-            for option in self.phe_par.input.parameters.map_omit_mode:
-                if option[0] == "*":
-                    self.omit_mode = option[1::]
-
-            """
-            fix dev options here
-            """
+        phil_f = open(phenix_params,'r')
+        phil_str = phil_f.read()
+        phil_f.close()
+        pprobe_phil = phil.parse(phil_str)
+        self.phe_par = pprobe_phil.extract()
+        for option in self.phe_par.input.parameters.map_omit_mode:
+            if option[0] == "*":
+                self.omit_mode = option[1::]
+        extract_asstr = self.phe_par.pprobe.extract[0]
+        extract = extract_asstr[0].lower() == "t"
+        if extract:
             if self.omit_mode == "valsol":
-                self.dev_opts['proc_sol'] = False
-            self.cmdline=""
+                self.model_pdb = self.phe_par.input.pdb.strip_pdb[0]
+            else:
+                self.model_pdb = self.phe_par.input.pdb.model_pdb[0]
+            self.strip_pdb = self.phe_par.input.pdb.strip_pdb[0]
+            self.peaks_pdb = self.phe_par.input.pdb.peaks_pdb[0]
+            self.map_coeff = self.phe_par.input.input_map.map_coeff_file[0]
+        mdict_file = self.phe_par.input.model_param.model_dict_file[0]
+        self.master_dict = self.ppio.read_master_dict(input_dfile=mdict_file)
+        scres = self.phe_par.input.parameters.score_res
+        if scres is not None:
+            self.score_res = self.phe_par.input.parameters.score_res[0]
+        self.out_prefix  = self.phe_par.output.output_peak_prefix[0][0:4]
+        # I can't figure out this phil parse thing, so bad hack here
+
+        """
+        fix dev options here
+        """
+        if self.omit_mode == "valsol":
+            self.dev_opts['proc_sol'] = False
+        self.cmdline="" #keep some old code from breaking (FIX)
 
 
 
@@ -196,7 +186,7 @@ class PhenixTasks:
                 continue
             pdict['status'] = 5
         sol_noproc = list(pdict['unal'] for pdict in peak_unal_db.values() if (pdict['model'] == 3 and pdict['unat'] not in added_sol_unat))
-        for unal in sol_noproc:
+        for unal in sol_noproc: 
             pdict = peak_unal_db[unal]
             processed = self.peak_process(pdict,symmetry,orig_pdb_hier,strip_pdb_hier,peak_pdb_hier,struct_data,full_proc=False)
             if processed == "ERROR":

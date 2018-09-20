@@ -38,9 +38,12 @@ class Output:
         else:
             sm = self.u2r.get(restab['unal'][dat['modi']],"None")
   
-        fmtstr = ('{:<14} TYPE {:1} GRP {:4} {:2} PROC {:1} PICK {:1} {:1} QUAL {:1} MOD {:1} SM {:<14} MOC {:1} MQUAL {:1} MPICK {:1} {:1} MLAB {:1} CMP {:2} FC {:1} MF {:1}{:1}{:1} STAT {:4} NP {:1} GV {:3} {:1}')
-        outstr = fmtstr.format(resat,dat['model'],dat['group'],dat['grank'],dat['proc'],dat['pick'],dat['cpick'],dat['qual'],dat['mod'],sm,dat['moc'],dat['mqual'],dat['mpick'],dat['mcpick'],dat['mlab'],
-                               dat['mcomp'],dat['fc'],dat['mfr'],dat['mfq'],dat['mfl'],dat['status'],dat['npick'],dat['istat'],dat['fmk'])
+        fmtstr = ('{:<14} TYPE {:1} GRP {:4} {:2} PROC {:1} PICK {:1} {:1} QUAL {:1} MOD {:1} SM {:<14} MOC {:1} ' 
+                  'MQUAL {:1} MPICK {:1} {:1} MLAB {:1} CMP {:2} FC {:1} MF {:1}{:1}{:1} STAT {:4} NP {:1} GV {:3} {:1}')
+        outstr = fmtstr.format(resat,dat['model'],dat['group'],dat['grank'],dat['proc'],dat['pick'],dat['cpick'],
+                               dat['qual'],dat['mod'],sm,dat['moc'],dat['mqual'],dat['mpick'],dat['mcpick'],
+                               dat['mlab'],dat['mcomp'],dat['fc'],dat['mfr'],dat['mfq'],dat['mfl'],
+                               dat['status'],dat['npick'],dat['istat'],dat['fmk'])
         print pref,outstr
     
 
@@ -48,17 +51,17 @@ class Output:
     def initialize_lists(self,all_peak_db,valsol=False):
 
 
-        if valsol: #peaks are models, make copies
-            pu_list = list(pdict['unal'] for pdict in all_peak_db.values() if pdict['model'] == 4)
-            for sind,unal in enumerate(pu_list):
-                pdict = all_peak_db[unal]
-                new_unal = hash("SOL"+str(unal))
-                all_peak_db[new_unal] = {k:v for k,v in pdict.iteritems()}
-                sdict = all_peak_db[new_unal]
-                sdict['model'] == 3
-                sdict['mod_for'] = (unal,0.0)
-                pdict['sol_mod'] = (new_unal,0.0)
-
+        #if valsol: #peaks are models, make copies
+        #    pu_list = list(pdict['unal'] for pdict in all_peak_db.values() if pdict['model'] == 4)
+        #    for sind,unal in enumerate(pu_list):
+        #        pdict = all_peak_db[unal]
+        #        new_unal = hash("SOL"+str(unal))
+        #        all_peak_db[new_unal] = {k:v for k,v in pdict.iteritems()}  
+        #        sdict = all_peak_db[new_unal]
+        #        sdict['model'] == 3
+        #        sdict['mod_for'] = [(unal,0.0),]
+        #        pdict['sol_mod'] = [(new_unal,0.0),]
+  
 
 
         # start with null null peak
