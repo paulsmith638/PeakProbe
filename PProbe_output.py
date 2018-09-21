@@ -11,62 +11,42 @@ import iotbx.pdb
 from scitbx.array_family import flex
 
 class Output:
-    def __init__(self,mdict_file=None,outstem=None):
+    def __init__(self,mdict_file=None):
         self.ppio = PPio(phenix_python=False)
         self.pput = Util()
         self.ppstat = StatFunc()
         self.master_dict = self.ppio.read_master_dict(input_dfile=mdict_file)
         self.initialized = False
-        if outstem is None:
-            self.outstem = "test_"
-        else:
-            self.outstem=outstem
+        self.outstem = "test_output_"
         self.istat_dict = self.get_istat_dict()
 
-    def tab_iprint(self,i,pref=""):
-        restab = self.restab
-        dat = restab[i]
-        resat = self.u2r.get(dat['unal'],"Unk")
-        if dat['mod'] == 0:
-            if dat['model'] == 3:
-                if int(dat['moc']/2) % 2 == 1: #claimed
-                    sm = "[%s]" % self.u2r.get(restab['unal'][dat['peaki']],"Unk")
-                else:
-                    sm = "---unclaimed"
-            else:
-                sm = "None"
-        else:
-            sm = self.u2r.get(restab['unal'][dat['modi']],"None")
-  
-        fmtstr = ('{:<14} TYPE {:1} GRP {:4} {:2} PROC {:1} PICK {:1} {:1} QUAL {:1} MOD {:1} SM {:<14} MOC {:1} ' 
-                  'MQUAL {:1} MPICK {:1} {:1} MLAB {:1} CMP {:2} FC {:1} MF {:1}{:1}{:1} STAT {:4} NP {:1} GV {:3} {:1}')
-        outstr = fmtstr.format(resat,dat['model'],dat['group'],dat['grank'],dat['proc'],dat['pick'],dat['cpick'],
-                               dat['qual'],dat['mod'],sm,dat['moc'],dat['mqual'],dat['mpick'],dat['mcpick'],
-                               dat['mlab'],dat['mcomp'],dat['fc'],dat['mfr'],dat['mfq'],dat['mfl'],
-                               dat['status'],dat['npick'],dat['istat'],dat['fmk'])
-        print pref,outstr
-    
 
-
-    def initialize_lists(self,all_peak_db,valsol=False):
+    def initialize_lists(self,all_peak_db,omit_mode=None):
 
         # start with null null peak
         # included so refs to index 0 point to null
         null_peak = all_peak_db[-8861610501908601326]
-
+        self.outstem = null_peak['info']['param'].output.output_file_name_prefix[0]
+        if omit_mode is None:
+            omit_mode = null_peak['info'].get('omit_mode','omitsw')
+        self.omit_mode = omit_mode
+        valsol = omit_mode == 'valsol'
         self.all_unal = [null_peak['unal'],]  
         self.all_unat = [null_peak['unat'],]
         self.all_unal.extend(list(pdict['unal'] for pdict in all_peak_db.values() if pdict['model'] in [3,4]))
         self.all_unat.extend(list(pdict['unat'] for pdict in all_peak_db.values() if pdict['model'] in [3,4]))
-        self.omit_unat = list(pdict['unat'] for pdict in all_peak_db.values() if (pdict['model'] == 2 or( pdict['model'] == 3 and valsol)))
+        self.omit_unat = list(pdict['unat'] for pdict in all_peak_db.values() if 
+                              (pdict['model'] == 2 or( pdict['model'] == 3 and valsol)))
         omitted_sol_at = set(self.all_unat) & set(self.omit_unat)
         self.omitted_solu = list(unal for unal in self.all_unal if all_peak_db[unal]['unat'] in omitted_sol_at)
         ptot = len(self.all_unal)
-        columns = ('unal','group','grank','model','proc','pick','cpick','qual','mod','modi','peaki','moc','mqual','mpick','mlab','mcpick','mcomp','fc','mfr','mfq','mfl','status','npick','istat','fmk')
-        fmts =    ('i8'  ,'i8'   , 'i2'  , 'i2'  ,  'i2', 'i2' ,'i2'   ,'i2'  ,'i4' ,'i2'  ,'i2'   ,'i2' ,'i2'   ,'i2'   ,'i2'  ,'i2'    ,'i2'   ,'i2','i2' ,'i2' ,'i2' ,'i2'    ,'i2'   ,'i2'   ,'i2')
+        columns = ('unal','group','grank','model','proc','pick','cpick','qual','mod','modi','peaki','moc',
+                   'mqual','mpick','mlab','mcpick','mcomp','fc','mfr','mfq','mfl','status','npick','istat','fmk')
+        fmts =    ('i8'  ,'i8'   , 'i2'  , 'i2'  ,  'i2', 'i2' ,'i2'   ,'i2'  ,'i4' ,'i2'  ,'i2'   ,'i2' ,'i2'   ,
+                   'i2'   ,'i2'  ,'i2'    ,'i2'   ,'i2','i2' ,'i2' ,'i2' ,'i2'    ,'i2'   ,'i2'   ,'i2')
         rt_dtype = np.dtype(zip(columns,fmts))
         self.restab = np.zeros(ptot,dtype=rt_dtype)
-        #lookup hashes
+        #lookup hashes/functions for converting between indexing schemes and useful identifiers
         self.u2i = {}
         self.i2u = {}
         self.u2r = {}
@@ -78,6 +58,7 @@ class Output:
             self.u2r[unal] = all_peak_db[unal]['resat']
 
 
+        #matrix of cross model contacts
         self.pm_mat = self.get_pm_mat(all_peak_db)
 
         for uind,unal in enumerate(self.all_unal):
@@ -95,6 +76,13 @@ class Output:
                 urow['mfr'] = (pdict['mf'] % 100)/10
                 urow['mfq'] = pdict['mf'] % 10
                 urow['proc'] = pdict['status'] not in [3,7]
+                if valsol: #models are self
+                    urow['mod'] = 1
+                    urow['mlab'] = pdict['label']
+                    continue
+                elif self.omit_mode == 'asis':
+                    urow['mod'] = 0
+                    continue
                 match_soli = list(np.nonzero(self.pm_mat[uind]>=0.0)[0])
                 if len(match_soli)>0:
                     mod_soli = list(si for si in match_soli if self.pm_mat[uind][si] < 1.65 and si != uind)
@@ -103,9 +91,6 @@ class Output:
                     if n_mod > 0:
                         urow['mod'] = n_mod
                         urow['modi'] = mod_soli[0]
-                if valsol: #models are self
-                    urow['mod'] = 1
-                    urow['mlab'] = pdict['label']
             elif urow['model'] == 3:
                 urow['proc'] = pdict['status'] not in [1,3,6,7]
                 claimed_by_i = list(np.nonzero(self.pm_mat[uind]>=0.0)[0])
@@ -123,7 +108,10 @@ class Output:
                 urow['mlab'] = pdict['label']
                 if urow['fc'] == -1:
                     urow['fc'] = 0
+                if self.omit_mode == 'asis':
+                    urow['moc'] = 0 #not omitted, claimed, or processed
 
+        #matrix of self-model associations
         self.link_mat = self.get_link_mat(all_peak_db)
         #group by linkage, peak/model pairs
         tmp_groups = []
@@ -186,33 +174,6 @@ class Output:
                 for si in gseli:
                     if s_moc > self.restab['moc'][si]:
                         self.restab['moc'][si] = s_moc
-     
-
-                    
-    def tab_rsel(self,column,tlist,match=False,union=None,intersect=None):
-        #returns boolean selectors
-        if type(tlist) != type([]):#in case called with bad arg
-            tlist = [tlist,]
-        sel = None
-        if len(tlist) == 1:
-            sel = self.restab[column] == tlist[0]
-        elif len(tlist) == 2 and not match: #take as low/high inclusive
-            s1 = self.restab[column] >= tlist[0]
-            s2 = self.restab[column] <= tlist[1]
-            sel = np.logical_and(s1,s2)
-        elif len(tlist) > 2 or match: #accumulate matches
-            sel = np.zeros(self.restab.shape[0],dtype=np.bool_)
-            for val in tlist:
-                toadd = self.restab[column] == val
-                sel = np.logical_or(sel,toadd)
-        if union is not None:
-            sel = np.logical_or(union,sel)
-        if intersect is not None:
-            sel = np.logical_and(intersect,sel)
-        if sel is None: #failsafe
-            sel = np.zeros(self.restab.shape[0],dtype=np.bool_)
-        #print "SELECTED",np.count_nonzero(sel)
-        return sel
 
     def merge_masks(self,mask_list,opp=""):
         #be sure input masks are not overwritten
@@ -269,56 +230,6 @@ class Output:
         for pind,pi in enumerate(nproc_list):
             all_proc_list.append((0,pi,0,all_proc_list[-1][3]-1.0*pind))
         return all_proc_list
-                
-
-    def compare_p2m(self,all_peak_db,punal,sol_filt=None):
-        #compares histogram likelihoods peaks and model
-        #only 1 to 1, single peak vs single mod
-        rt = self.restab
-        if sol_filt is None: #all sol allowed
-            sol_filt = np.ones(rt.shape[0],dtype=np.bool_)
-
-        peak = rt[self.u2i[punal]]
-        pi = self.u2i[punal]
-        pdict = all_peak_db[punal]
-        p_pick = peak['pick']
-        p_group = peak['group']
-        mi = peak['modi']
-        solmod = rt[mi]
-        m_pick = solmod['pick']
-        m_group = solmod['group']
-        p_sel = self.ingroup_mat[p_group]
-        m_sel = self.ingroup_mat[m_group]
-        munal = solmod['unal']
-        if (peak['mod'] == 0 or peak['moc'] != 7  or peak['pick'] == 0):
-            #no model, model is not processed
-            rt['mcomp'][p_sel] = 0
-            rt['mcomp'][m_sel] = 0
-            return
-        if not sol_filt[mi]:
-            rt['mcomp'][p_sel] = 0
-            rt['mcomp'][m_sel] = 0
-            return
-
-        mdict = all_peak_db[munal]
-        peak_scores = pdict['prob_data'][:,p_pick-1]
-        mod_scores = mdict['prob_data'][:,m_pick-1]
-        count = np.count_nonzero(np.greater(peak_scores,mod_scores))
-        
-        if p_pick == m_pick:
-            if count > 1: #peak is better
-                rt['mcomp'][p_sel] = 1
-                rt['mcomp'][m_sel] = 2
-            else:#model has better scores
-                rt['mcomp'][p_sel] = 2
-                rt['mcomp'][m_sel] = 1
-        else: #disagreement
-            if count > 1: 
-                rt['mcomp'][p_sel] = 3
-                rt['mcomp'][m_sel] = 4
-            else:#model has better scores
-                rt['mcomp'][p_sel] = 4
-                rt['mcomp'][m_sel] = 3
 
     def expand_to_rg(self,all_peak_db,unal):
         pdict = all_peak_db[unal]
@@ -383,34 +294,41 @@ class Output:
                 else:
                     all_connect = exp_associations
                     cur_npeak = len(all_connect)
-                print "CONN CYCLE",self.i2r(i),cycle,cur_npeak
+                #print "CONN CYCLE",self.i2r(i),cycle,cur_npeak
             system_lists.append(all_connect)
         system_lists.sort(key = lambda ilist: len(ilist),reverse=True)
         #peaks in multiple systems are kept in larger systems, dropped in smaller
         placed_peaks = []
         unique_slists = []
         for slist in system_lists:
-            l1 = len(slist)
             tmp_list = list(pi for pi in slist if pi not in placed_peaks)
             placed_peaks.extend(tmp_list)
             l2 = len(tmp_list)
-            if len(tmp_list) > 0:
+            if l2 > 0:
                 unique_slists.append(tmp_list)
+        unique_slists.sort(key = lambda ilist: len(ilist),reverse=True)
         for slist in unique_slists:
             for pi in slist:
                 for pi2 in slist:
                     sm = rt['model'][pi2]
                     if pi != pi2:
                         system_mat[pi,pi2] = sm
-
-        for pind,system in enumerate(system_mat):
-            peaks = list(np.nonzero(system==4)[0])
-            solmod = list(np.nonzero(system==3)[0])
-            ppicks = " ".join(list(str(rt['pick'][pi]) for pi in peaks))
-            spicks = " ".join(list(str(rt['pick'][si]) for si in solmod))
-            pstr = " ".join(list(self.i2r(x) for x in peaks))
-            sstr = " ".join(list(self.i2r(x) for x in solmod)) 
-            #print "SYSTEM",len(peaks),len(solmod),system[pind],"||"," || ".join([ppicks,spicks,pstr,sstr])
+        #drop cross-model associations for in-place solvent
+        if self.omit_mode == 'asis':
+            for rind,row in enumerate(system_mat):
+                model=row[rind]
+                sel = np.logical_and(row > 0,row != model)
+                system_mat[rind,sel] = 0
+                
+        #debugging
+        #for pind,system in enumerate(system_mat):
+        #    peaks = list(np.nonzero(system==4)[0])
+        #    solmod = list(np.nonzero(system==3)[0])
+        #    ppicks = " ".join(list(str(rt['pick'][pi]) for pi in peaks))
+        #    spicks = " ".join(list(str(rt['pick'][si]) for si in solmod))
+        #    pstr = " ".join(list(self.i2r(x) for x in peaks))
+        #    sstr = " ".join(list(self.i2r(x) for x in solmod)) 
+        #    print "SYSTEM",len(peaks),len(solmod),system[pind],"||"," || ".join([ppicks,spicks,pstr,sstr])
             
         self.ingroup_mat = ingroup_mat
         self.system_mat = system_mat
@@ -791,7 +709,7 @@ class Output:
         self.append_istat(all_peak_db)
 
         #clash/quality filters
-        no_clash = self.tab_rsel('fc',[0,1,6,7])
+        no_clash = self.merge_masks(list(rt['fc'] == allowed for allowed in [0,1,6,7]),opp='u')
         #cumulative
         qual1 = self.merge_masks([rt['qual'] > 6,no_clash,rt['fmk']==0,proc])
         qual2 = self.merge_masks([rt['qual'] > 3,no_clash,rt['fmk']==0,proc])
@@ -1357,7 +1275,7 @@ class Output:
             else:
                 rt['fmk'][pi] = -4
         to_build = list(np.nonzero(rt['fmk'] == 4)[0])
-        allm_ranked = self.explicit_rank(all_peak_db,all_meti)
+        allm_ranked = self.explicit_rank(all_peak_db,to_build)
         ranked_mi = list(rank[1] for rank in allm_ranked)
         m_pdb_str = self.get_sel_pdb(all_peak_db,ranked_mi,chainid="M")
 
@@ -1413,40 +1331,40 @@ class Output:
         rt = self.restab
         w_istat = list(k for k,v in self.istat_dict.iteritems() if v['out'] == 1)
         print "WATER SELECT",w_istat
-        s_w_nomod_keep = self.merge_masks([rt['model'] == 3,rt['mlab'] == 1,rt['moc'] == 0,rt['istat']==7])
-        w_sel = self.merge_masks(list(rt['istat'] == stat for stat in w_istat),opp='u')
-        all_wat = self.merge_masks([w_sel,s_w_nomod_keep],opp='u')
-        wati = list(np.nonzero(all_wat)[0])
+        #s_w_nomod_keep = self.merge_masks([rt['model'] == 3,rt['mlab'] == 1,rt['moc'] == 0,rt['istat']==7])
+        w_out = self.merge_masks(list(rt['istat'] == stat for stat in w_istat),opp='u')
+        #all_wat = self.merge_masks([w_sel,s_w_nomod_keep],opp='u')
+        wati = list(np.nonzero(w_out)[0])
         return wati
 
     def collect_so4(self,all_peak_db):
         rt = self.restab
         s_istat = list(k for k,v in self.istat_dict.iteritems() if v['out'] == 2)
         print "SO4 SELECT",s_istat
-        s_sel = self.merge_masks(list(rt['istat'] == stat for stat in s_istat),opp='u')
-        s_s_nomod_keep = self.merge_masks([rt['model'] == 3,rt['mlab'] == 2,rt['moc'] == 0,rt['istat']==7])
-        all_so4 = self.merge_masks([s_sel,s_s_nomod_keep],opp='u')
-        so4i = list(np.nonzero(all_so4)[0])
+        s_out = self.merge_masks(list(rt['istat'] == stat for stat in s_istat),opp='u')
+        #s_s_nomod_keep = self.merge_masks([rt['model'] == 3,rt['mlab'] == 2,rt['moc'] == 0,rt['istat']==7])
+        #all_so4 = self.merge_masks([s_sel,s_s_nomod_keep],opp='u')
+        so4i = list(np.nonzero(s_out)[0])
         return so4i
 
     def collect_oth(self,all_peak_db):
         rt = self.restab
         o_istat = list(k for k,v in self.istat_dict.iteritems() if v['out'] == 3)
         print "OTH SELECT",o_istat
-        o_sel = self.merge_masks(list(rt['istat'] == stat for stat in o_istat),opp='u')
-        s_o_nomod_keep = self.merge_masks([rt['model'] == 3,rt['mlab'] == 3,rt['moc'] == 0,rt['istat']==7])
-        all_oth = self.merge_masks([o_sel,s_o_nomod_keep],opp='u')
-        othi = list(np.nonzero(all_oth)[0])
+        o_out = self.merge_masks(list(rt['istat'] == stat for stat in o_istat),opp='u')
+        #s_o_nomod_keep = self.merge_masks([rt['model'] == 3,rt['mlab'] == 3,rt['moc'] == 0,rt['istat']==7])
+        #all_oth = self.merge_masks([o_sel,s_o_nomod_keep],opp='u')
+        othi = list(np.nonzero(o_out)[0])
         return othi
 
     def collect_metal(self,all_peak_db):
         rt = self.restab
         m_istat = list(k for k,v in self.istat_dict.iteritems() if v['out'] == 4)
         print "ML1 SELECT",m_istat
-        m_sel = self.merge_masks(list(rt['istat'] == stat for stat in m_istat),opp='u')
-        s_m_nomod_keep = self.merge_masks([rt['model'] == 3,rt['mlab'] == 4,rt['moc'] == 0,rt['istat']==7])
-        all_met = self.merge_masks([m_sel,s_m_nomod_keep],opp='u')
-        meti = list(np.nonzero(all_met)[0])
+        m_out = self.merge_masks(list(rt['istat'] == stat for stat in m_istat),opp='u')
+        #s_m_nomod_keep = self.merge_masks([rt['model'] == 3,rt['mlab'] == 4,rt['moc'] == 0,rt['istat']==7])
+        #all_met = self.merge_masks([m_sel,s_m_nomod_keep],opp='u')
+        meti = list(np.nonzero(m_out)[0])
         return meti
 
 
@@ -1677,7 +1595,10 @@ class Output:
                 atrec = self.pput.write_atom(serial,an,"",resname,chain,resid,"",x,y,z,occ,bfac,elem,"")
                 atrec = atrec.strip()+fake_segid+"\n"
                 pdb_records.append(atrec)
-            pdict['pdb_out'] = pdb_records[-1][17:26]
+            if len(pdb_records) > 0:
+                pdict['pdb_out'] = pdb_records[-1][17:26]
+            else:
+                pdict['pdb_out'] = "not_output"
         pdbstr = "".join(pdb_records)
         return pdbstr
                         
@@ -2299,7 +2220,7 @@ class Output:
             verdict.append("FINAL: Both Peak and Model dropped")
         else:
             verdict.append("FINAL: Dropped --> failed quality tests")
-        fate = p_verdict[0:11].strip()
+        fate = self.istat_dict[rt['istat'][pi]]['verdict'][0:11].strip()
         #ASSEMBLE OUTPUT STRINGS
         pout01 = "%s %s (%s) Status: %s %s Flags: %s PNW: %s Fate: %s " % (ptype,peakid,resat,status,rt['istat'][pi],cls,str(pdict['prob'])[0:5],fate)
         pout02 = "   DEN: FoFc %5.2f 2FoFc %5.2f ED_score %4.1f ED_class %s" % (fsig,f2sig,scr,edc)
@@ -2427,16 +2348,17 @@ class Output:
         str21 = "----With paired Peak           --> %5s                %s " % (cnz(cond_md_pair),pop_insel(cond_md_pair,rt['mlab']))
         str22 = "----Unclaimed                  --> %5s                %s " % (cnz(cond_md_unpair),pop_insel(cond_md_unpair,rt['mlab']))
         str23 = ""
-        str23 = "Solvent Model Output:          --> %5s                %s " % (cnz(rt['fmk'] > 0),pop_insel(rt['fmk']>0,rt['fmk']))
-        str24 = "-"*79
-        str25 = "BREAKDOWN INS/OUTS"
-        str26 = "--> applies to paired Peaks/Mods with labeled Model"
-        str27 = "       will be all zero if no solvent input!"
-        str28 = "\n".join(self.get_confused(all_peak_db,pref="CMAT",filter=rt['fmk']>0)[:-1])
-        str29 = ""
+        str24 = ""
+        str25 = "Solvent Model Output:          --> %5s                %s " % (cnz(rt['fmk'] > 0),pop_insel(rt['fmk']>0,rt['fmk']))
+        str26 = "-"*79
+        str27 = "BREAKDOWN INS/OUTS"
+        str28 = "--> applies to paired Peaks/Mods with labeled Model"
+        str29 = "       will be all zero if no solvent input!"
+        str30 = "\n".join(self.get_confused(all_peak_db,pref="CMAT",filter=rt['fmk']>0)[:-1])
+        str31 = ""
         preamble = "\n".join([str01,str02,str03,str04,str05,str06,str07,str08,str09,str10,
                               str11,str12,str13,str14,str15,str16,str17,str18,str19,str20,
-                              str21,str22,str23,str24,str25,str26,str27,str28,str29])
+                              str21,str22,str23,str24,str25,str26,str27,str28,str29,str30])
         return preamble
 
 
@@ -2538,3 +2460,25 @@ class Output:
         print >> report,"\n".join(short_outputs)
         report.close()
 
+    def tab_iprint(self,i,pref=""):
+        restab = self.restab
+        dat = restab[i]
+        resat = self.u2r.get(dat['unal'],"Unk")
+        if dat['mod'] == 0:
+            if dat['model'] == 3:
+                if int(dat['moc']/2) % 2 == 1: #claimed
+                    sm = "[%s]" % self.u2r.get(restab['unal'][dat['peaki']],"Unk")
+                else:
+                    sm = "---unclaimed"
+            else:
+                sm = "None"
+        else:
+            sm = self.u2r.get(restab['unal'][dat['modi']],"None")
+  
+        fmtstr = ('{:<14} TYPE {:1} GRP {:4} {:2} PROC {:1} PICK {:1} {:1} QUAL {:1} MOD {:1} SM {:<14} MOC {:1} ' 
+                  'MQUAL {:1} MPICK {:1} {:1} MLAB {:1} CMP {:2} FC {:1} MF {:1}{:1}{:1} STAT {:4} NP {:1} GV {:3} {:1}')
+        outstr = fmtstr.format(resat,dat['model'],dat['group'],dat['grank'],dat['proc'],dat['pick'],dat['cpick'],
+                               dat['qual'],dat['mod'],sm,dat['moc'],dat['mqual'],dat['mpick'],dat['mcpick'],
+                               dat['mlab'],dat['mcomp'],dat['fc'],dat['mfr'],dat['mfq'],dat['mfl'],
+                               dat['status'],dat['npick'],dat['istat'],dat['fmk'])
+        print pref,outstr

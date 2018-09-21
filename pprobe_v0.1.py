@@ -244,10 +244,11 @@ def run_pprobe(all_params, log = sys.stdout):
   print >> log, "-"*79
   print >> log, "PPROBE PEAK ANALYSIS:"
 
+  ppout = Output()
   ppio = DataIO()
   outstem = all_params.output.output_file_name_prefix
-  ppout = Output(outstem=outstem)
   
+  omit_mode = all_params.input.parameters.map_omit_mode
   pptask = PhenixTasks(phenix_params=all_params.output.output_file_name_prefix+"_pprobe.param")
 
   if all_params.pprobe.extract:
@@ -259,6 +260,11 @@ def run_pprobe(all_params, log = sys.stdout):
     pkl_file = all_params.input.data_pkl.peak_dict
     print >> log, "   --> reading feature data from %s" % pkl_file
     peak_unal_db = easy_pickle.load(pkl_file)
+    null_peak = peak_unal_db.get(-8861610501908601326,None)
+    if null_peak is None:
+      omit_mode=all_params.input.parameters.map_omit_mode
+    else:
+      omit_mode = null_peak['info'].get('omit_mode','omitsw')
   input_feat=list(pdict for pdict in peak_unal_db.values() if ( pdict['model'] == 4 and pdict['status'] == 0))
   ori_feat=list(pdict for pdict in peak_unal_db.values() if pdict['model'] == 3 and pdict['status'] == 5)
   master_array=ppio.extract_raw(input_feat)
@@ -287,8 +293,7 @@ def run_pprobe(all_params, log = sys.stdout):
   print >> log,"-"*79
   print >> log,"Analyzing Peak Data . . . "
 
-  valsol = all_params.input.parameters.map_omit_mode == "valsol"
-  ppout.initialize_lists(peak_unal_db,valsol=valsol)
+  ppout.initialize_lists(peak_unal_db,omit_mode=omit_mode)
   ppout.breakdown(peak_unal_db)
   ppout.write_ref_pdb(peak_unal_db)
   report_file=all_params.output.output_file_name_prefix+"_report.log"
