@@ -2345,7 +2345,7 @@ class Output:
         cnz = np.count_nonzero
 
         null_peak = all_peak_db[-8861610501908601326]
-        omit_mode = null_peak['info']['omit_mode']
+        omit_mode = null_peak['info'].get('omit_mode','omitsw')
 
         peaks = rt['model'] == 4
         mods = rt['model'] == 3
