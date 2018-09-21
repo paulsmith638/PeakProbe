@@ -26,7 +26,12 @@ class Output:
         # start with null null peak
         # included so refs to index 0 point to null
         null_peak = all_peak_db[-8861610501908601326]
-        self.outstem = null_peak['info']['param'].output.output_file_name_prefix[0]
+
+        tmp_out = null_peak['info']['param'].output.output_file_name_prefix
+        if type(tmp_out) == type([]):
+            self.outstem=tmp_out[0]
+        else:
+            self.outstem=tmp_out
         if omit_mode is None:
             omit_mode = null_peak['info'].get('omit_mode','omitsw')
         self.omit_mode = omit_mode
@@ -82,6 +87,7 @@ class Output:
                     continue
                 elif self.omit_mode == 'asis':
                     urow['mod'] = 0
+                    pdict['mflag'] = 1
                     continue
                 match_soli = list(np.nonzero(self.pm_mat[uind]>=0.0)[0])
                 if len(match_soli)>0:
@@ -1198,7 +1204,8 @@ class Output:
             pnw = pdict['prob']
             fc = pdict['fc']
             den = pdict['2fofc_sigo_scaled']
-            if edc + cc > 9 and pnw < 0.5 and fc in [0,1,4,5] and den > 0.5:
+            c1 = pdict['c1']
+            if edc + cc > 9 and pnw < 0.5 and fc in [0,1,4,5] and den > 0.5 and c1 > 1.65:
                 rt['fmk'][pi] = 1
             else:
                 rt['fmk'][pi] = -1

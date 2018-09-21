@@ -260,11 +260,9 @@ def run_pprobe(all_params, log = sys.stdout):
     pkl_file = all_params.input.data_pkl.peak_dict
     print >> log, "   --> reading feature data from %s" % pkl_file
     peak_unal_db = easy_pickle.load(pkl_file)
-    null_peak = peak_unal_db.get(-8861610501908601326,None)
-    if null_peak is None:
-      omit_mode=all_params.input.parameters.map_omit_mode
-    else:
-      omit_mode = null_peak['info'].get('omit_mode','omitsw')
+    null_sanity(peak_unal_db,all_params)
+    null_peak = peak_unal_db[-8861610501908601326] #null_peak
+    omit_mode = null_peak['info'].get('omit_mode','omitsw')
   input_feat=list(pdict for pdict in peak_unal_db.values() if ( pdict['model'] == 4 and pdict['status'] == 0))
   ori_feat=list(pdict for pdict in peak_unal_db.values() if pdict['model'] == 3 and pdict['status'] == 5)
   master_array=ppio.extract_raw(input_feat)
@@ -713,7 +711,50 @@ def create_pprobe_maps(f_obs,r_free_flags,params,strip_xrs,strip_hier,log):
 
 
 
+def null_sanity(peak_unal_db,all_params):
+  #previous versions stored a pkl without a null peak, which contains important parameters
+  #hack to create a dummpy peak with appropriate info
+  null_peak = peak_unal_db.get(-8861610501908601326,None)
+  if null_peak is None:
+    for option in all_params.input.parameters.map_omit_mode:
+      if option[0] == "*":
+        omit_mode = option[1::]
+    model_pdb = all_params.input.pdb.model_pdb[0]
+    cs = crystal_symmetry_from_any.extract_from(model_pdb)
 
+    null_peak = {'edc': 0, 'sol_contacts': [], '2fofc_sig_out': 0.0, 'wat_2fofc_ref_oricoords': (), 'pick_name': '', 
+                 'c1': 0.0, 'clust_score': 0, 'so4_cc_2fofc_inv_out': 0.0, 'ambig': 0, 'charge': 0.0, 'bin': 0, 
+                 'wat_cc_2fofc_in': 0.0, 'llgS': 0.0, 'fofc_sig_in': 0.0, '2fofc_sig_in': 0.0, 'llgW': 0.0, 'scr3': 0.0, 
+                 'modexp_clust': [], 'tflag': 0, 'orires': '', 'so4_cc_fofc_inv_in': 0.0, 'resid': '0', 'resat': 'NUL_P0_O', 
+                 'coord': (999.99, 999.99, 999.99), 'dmove': 0.0, 'unrg': 6626794411521655213, 'wat_cc_fofc_in': 0.0, 'ptype': '', 
+                 'cont_db': {}, 'batch': 0, 'wat_cc_fofc_inv': 0.0, 'mod_for': [], 'pdb_code': '', 'clash': False, 
+                 'so4_fofc_stdev_cc60': 0.0, 'contacts': [], 'so4_2fofc_stdev_cc60': 0.0, 'wat_cc_2fofc_out': 0.0, 'label': 0, 
+                 'strip_contacts': [], 'score': 0.0, 'clust_rank': 0, 'rc': 0, 'so4_fofc_coord_out': (), 'prob': 0.0, 'wat_fofc_coord_out': (), 
+                 'db_id': 'null_P_00000', 'ori_chain': 'P', 'so4_cc_2fofc_out': 0.0, 'wm': 0, 'wl': 0, 'solc': 0.0, 'so4_cc_fofc_out': 0.0, 
+                 'wt': 0, 'master_dict': {}, 'ol': 0, 'so4_cc_fofc_in': 0.0, 'oh': 0, 'clust_mem': [], 'so4_cc_2fofc_in': 0.0, 'omit': 0, 
+                 'pick': 0, 'cscore': 0.0, 'so4_cc_fofc_inv_rev': 0.0, 'peak_contacts': [], 'cc': 0, 'mm_contacts': [], 
+                 'unat': -6006398286768061262, 'clust_cent': 0.0, 'cllgW': 0.0, 'cllgS': 0.0, 'unal': -8861610501908601326, 
+                 'ori_resid': '0', 'mod_cont': [], 'om': 0, 'anc_for': [], 
+                 'so4_2fofc_ref_oricoords': [('X', (0.0, 0.0, 0.0)), ('X', (0.0, 0.0, 0.0)), ('X', (0.0, 0.0, 0.0)), 
+                                             ('X', (0.0, 0.0, 0.0)), ('X', (0.0, 0.0, 0.0))], 
+                 'filter_mask': [0, 0, 0, 0], 'info': {'symmetry': cs,
+                                                       'param': all_params,
+                                                       'omit_mode': omit_mode}, 
+                 'scr1': 0.0, 'scr2': 0.0, 's_contacts': [], 'so4_cc_2fofc_inv_in': 0.0, 'clust_pair': [], 'anchor': {}, 
+                 'chainid': 'P', 'w_contacts': [], 'so4_cc_fofc_inv_out': 0.0, 'so4_cc_2fofc_inv_rev': 0.0, 'mf': 0, 
+                 'so4_2fofc_mean_cc60': 0.0, 'anc_cont': [], 'wat_cc_2fofc_inv': 0.0, 
+                 'prob_data': array([[ 0.,  0.,  0.,  0.],
+                                     [ 0.,  0.,  0.,  0.],
+                                     [ 0.,  0.,  0.,  0.]]), 
+                 'fofc_sigo_scaled': 0.0, 'fofc_sig_out': 0.0, 'chiS': 0.0, 'chiW': 0.0, 'vol_fofc': 0.0, 'cchiW': 0.0, 
+                 'cchiS': 0.0, 'peak_unal_db': {}, 'status': -1, 'inputs': {'ori_hier': None}, 
+                 'mflag': 0, 'warnings': [], 'omit_contacts': [], '2fofc_sigo_scaled': 0.0, 'sol_mod': [], 'fc': 0, 'worst_mm': {}, 
+                 'sp': 0, 'wat_cc_fofc_out': 0.0, 'st': 0, 'sm': 0, 'sl': 0, 'so4_fofc_mean_cc60': 0.0, 'model': 5, 'resolution': 0.0, 'vol_2fofc': 0.0}
+    peak_unal_db[-8861610501908601326] = null_peak
+    return
+  else:
+    null_peak['info']['param'] = all_params
+    return
 
 
 if (__name__ == "__main__"):

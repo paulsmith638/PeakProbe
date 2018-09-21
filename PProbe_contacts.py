@@ -666,9 +666,9 @@ class Contacts:
                         pdict['label'] = 1
                   elif pdict['orires'] in ['SO4','PO4']:
                         pdict['label'] = 2
-                  elif pdict['orires'] in ppio.common_oth:
+                  elif pdict['orires'].strip() in ppio.common_oth:
                         pdict['label'] = 3
-                  elif pdict['orires'] in ppio.common_met:
+                  elif pdict['orires'].strip() in ppio.common_met:
                         pdict['label'] = 4
                   else:
                         pdict['label'] = 0
@@ -676,8 +676,16 @@ class Contacts:
                   pdict['orires'] = pdict['resat'].split("_")[0]
                   pdict['label'] = 0
             #here, set c1 , might be updated later with new "anchor" contact
-            pdict['anchor'] = mm_contacts[0]
-            pdict['c1'] = mm_contacts[0]['distance']
+            if omit_mode == 'asis':
+                  closest_mm = mm_contacts[0]
+                  closest_sol = all_sol_cont[0]
+                  if closest_mm['distance'] < closest_sol['distance']:
+                        pdict['anchor'] = closest_mm
+                  else:
+                        pdict['anchor'] = closest_sol
+            else:
+                  pdict['anchor'] = mm_contacts[0]
+            pdict['c1'] = pdict['anchor']['distance']
             #next, get local probability environment "charge"
             pdict['charge'] = self.charge(all_ori_cont) #scoring includes some common solvent
 
@@ -693,7 +701,11 @@ class Contacts:
             pdict['sol_mod'] = []
             pdict['mflag'] = 0
             if pdict['c1'] < 2.5:
-                  close_cont = self.close_cont(mm_contacts,cutoff=2.5)
+                  if omit_mode == 'asis':
+                        c_source = all_ori_cont
+                  else:
+                        c_source = mm_contacts
+                  close_cont = self.close_cont(c_source,cutoff=2.5)
                   s_cc = sorted(close_cont,key = lambda x: len(x))
                   worst = s_cc[-1]
                   worst.sort(key = lambda x: x['distance'])
