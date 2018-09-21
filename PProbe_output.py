@@ -2219,14 +2219,15 @@ class Output:
         if rt['fmk'][pi] > 0:
             final_pick = rt['fmk'][pi]
             pdb_out = pdict.get('pdb_out',resid_names[final_pick-1])
-            verdict.append("FINAL: %s Built as %s in solvent model" % (ptype.strip(),"[ %s ]" % pdb_out.strip()))
+            verdict.append("FINAL: %s %s %s Built as %s in solvent model" % (ptype.strip(),resat,peakid,"%s" % ("_".join(x.strip() for x in pdb_out.split()))))
         elif paired and rt['fmk'][si] > 0:
             si_final_pick = rt['fmk'][si]
-            verdict.append("FINAL: Dropped in favor of %s %s as %s in solvent model" % (otype.strip(),self.i2r(si),resid_names[si_final_pick-1]))
+            verdict.append("FINAL: %s %s %s Dropped in favor of %s %s as %s in solvent model" % (otype.strip(),self.i2r(si),
+                                                                                              resid_names[si_final_pick-1],resat,peakid))
         elif paired:
-            verdict.append("FINAL: Both Peak and Model dropped")
+            verdict.append("FINAL: %s %s Both Peak and Model dropped" % (resat,peakid))
         else:
-            verdict.append("FINAL: Dropped --> failed quality tests")
+            verdict.append("FINAL: %s %s Dropped --> failed quality tests" % (resat,peakid))
         fate = self.istat_dict[rt['istat'][pi]]['verdict'][0:11].strip()
         #ASSEMBLE OUTPUT STRINGS
         pout01 = "%s %s (%s) Status: %s %s Flags: %s PNW: %s Fate: %s " % (ptype,peakid,resat,status,rt['istat'][pi],cls,str(pdict['prob'])[0:5],fate)
@@ -2234,7 +2235,7 @@ class Output:
         pout03 = "   ENV: Contact_score %4.1f Contact_class %s Anc_Dist %2.1fA" % (cscr,cc,adist)
         pout04 = "        CONTACTS Closest: %2.1fA %s  MacMol: %2.1fA %s Closest_Peak: %s" % (clori['distance'],clori['resat'],clmac['distance'],clmac['resat'],pcout)
         pout05 = "        -- Clashes: %s   Special: %s   Cluster: %s   Modelled/Claimed: %s" % (pdict['wt'],peak_spl,peak_clust,mod_flag)
-        pout06 = self.rep_print(pdict['contact_rep'],12)
+        pout06 = self.rep_print(pdict['contact_rep'],12) 
         pout07 = "   MODEL/PEAK PAIRING: %s" % peak_desc
         pout08 = self.rep_print(pdict['model_rep'],12)
         pout09 = "   SCORING:"
