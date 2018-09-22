@@ -1105,7 +1105,7 @@ class Output:
                             if len(valid_m) == 1:
                                 rt['istat'][valid_m[0]] = 401 # ASSIGN best m in metal cluster
                             elif len(valid_m) > 1:
-                                ranked_as_m = self.explicit_rank(all_peak_db,cand_m,forpick=4)
+                                ranked_as_m = self.explicit_rank(all_peak_db,valid_m,forpick=4)
                                 rt['istat'][ranked_as_m[0][1]] = 401 # ASSIGN accepted metal in cluster
                     #are the rest water?
                     ap_ilist = list(pi for pi in ranked_i if rt['istat'][pi] == 400)
@@ -2222,8 +2222,8 @@ class Output:
             verdict.append("FINAL: %s %s %s Built as %s in solvent model" % (ptype.strip(),resat,peakid,"%s" % ("_".join(x.strip() for x in pdb_out.split()))))
         elif paired and rt['fmk'][si] > 0:
             si_final_pick = rt['fmk'][si]
-            verdict.append("FINAL: %s %s %s Dropped in favor of %s %s as %s in solvent model" % (otype.strip(),self.i2r(si),
-                                                                                              resid_names[si_final_pick-1],resat,peakid))
+            verdict.append("FINAL: %s %s %s Dropped in favor of %s as %s in solvent model" % (otype.strip(),resat,peakid,self.i2r(si),
+                                                                                              resid_names[si_final_pick-1]))
         elif paired:
             verdict.append("FINAL: %s %s Both Peak and Model dropped" % (resat,peakid))
         else:
