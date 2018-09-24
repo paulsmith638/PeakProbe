@@ -1599,6 +1599,9 @@ class Output:
                     elem = an.strip()
                 else:
                     elem = an.strip()[0]
+                if resname.strip() == "PO4" and an.strip() == "S":
+                    an = " P  "
+                    elem = "P"
                 atrec = self.pput.write_atom(serial,an,"",resname,chain,resid,"",x,y,z,occ,bfac,elem,"")
                 atrec = atrec.strip()+fake_segid+"\n"
                 pdb_records.append(atrec)

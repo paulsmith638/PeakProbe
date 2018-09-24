@@ -220,15 +220,15 @@ class Contacts:
             red_hops = np.zeros((no_peaks,no_peaks))+1E20
             #uses Dikjstra's algorithm, once with distances, once with adjacency
             t_dist,t_path,t_hops = ppgraph.graph_dsp(sam,list(range(no_peaks)))
-            #fold all distances and hopes back into ASU, omit self 0.0 distance (but allow self by sim)
+            #fold all distances and hops back into ASU, omit self 0.0 distance (but allow self by sim)
             for i in range(no_peaks):
                   for j in range(no_peaks):
                         distances = list(t_dist[i].get(k,np.inf) for k in range(sam.shape[0]) if (k % no_peaks == j and k != i))
                         distances.extend(list(t_dist[j].get(k,np.inf) for k in range(sam.shape[0]) if (k % no_peaks == i and k != j)))
-                        #print i,j,distances
+                        distances.append(np.inf) #incase no distances, min is inf
                         hops = list(t_hops[i].get(k,np.inf) for k in range(sam.shape[0]) if ( k % no_peaks == j and k != i))
                         hops.extend(list(t_hops[j].get(k,np.inf) for k in range(sam.shape[0]) if ( k % no_peaks == i and k != j)))
-                        #print i,j,hops
+                        hops.append(np.inf)
                         red_dist[i,j] = np.amin(distances)
                         red_hops[i,j] = np.amin(hops)
 
