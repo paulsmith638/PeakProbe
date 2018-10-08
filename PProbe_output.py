@@ -748,7 +748,7 @@ class Output:
         #sometimes a peak is killed earlier, include here for completeness
         one_to_one_mods =  self.merge_masks([eval_class == 3,rt['istat'] == 0,ssel])
         peaks_for_mods = rt['peaki'][one_to_one_mods]
-        one_to_one = list(set(list(one_to_one_peaks) + list(peaks_for_mods)))
+        one_to_one = list(set(list(np.nonzero(one_to_one_peaks)[0]) + list(peaks_for_mods)))
         for pi in one_to_one:
             valid_peak = True
             if rt['istat'][pi] != 0:
@@ -1630,13 +1630,13 @@ class Output:
             serial = len(pdb_records)+1
             resid = pdict['resid']
             wx,wy,wz = pdict['wat_2fofc_ref_oricoords']
-            atrec = self.pput.write_atom(serial,"O","","HOH","P",resid,"",wx,wy,wz,1.0,35.0,"O","")
+            atrec = self.pput.write_atom(serial,"O","","HOH","P",resid,"A",wx,wy,wz,1.0,35.0,"O","")
             pdb_records.append(atrec)
             for an,coord in pdict['so4_2fofc_ref_oricoords']:
                 serial = len(pdb_records)+1
                 sx,sy,sz = coord
                 elem = an.strip()[0]
-                atrec = self.pput.write_atom(serial,an,"","SO4","P",resid,"",sx,sy,sz,1.0,35.0,elem,"")
+                atrec = self.pput.write_atom(serial,an,"","SO4","P",resid,"B",sx,sy,sz,1.0,35.0,elem,"")
                 pdb_records.append(atrec)
         pdb_str = "".join(pdb_records)
         output_hier = iotbx.pdb.input(source_info=None,lines=flex.split_lines(pdb_str))

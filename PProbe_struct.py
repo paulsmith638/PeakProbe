@@ -11,6 +11,7 @@ from scitbx.array_family import flex
 import mmtbx.utils
 from iotbx import reflection_file_utils
 from mmtbx.command_line import geometry_minimization
+from mmtbx.geometry_restraints.reference import add_coordinate_restraints
 from mmtbx import monomer_library
 import mmtbx.refinement.geometry_minimization
 from cctbx import maptbx
@@ -120,23 +121,17 @@ class StructData:
         geometry = processed_pdb.geometry_restraints_manager(
             show_energies      = False,
             plain_pairs_radius = 5.0)
-
-        restraints_manager = mmtbx.restraints.manager(geometry=geometry,normalization = False)
-        #object that stores coordinates
-        sites_start = self.std_so4_xrs.sites_cart()
-        #proxies needed for restraints?
         chain_proxy=processed_pdb.all_chain_proxies
-        restraints_selection = flex.bool(sites_start.size(), True)
-        select_str="Element S" #restrain center atom
+        sites_start = self.std_so4_xrs.sites_cart()
         selection=chain_proxy.selection("Element S")
-        #must select the "i" of an "i-j" pair?
-        isel=selection.iselection()
-        # new restraints system, should add a harmoinc restraint to S
-        restraints_manager.geometry.add_reference_coordinate_restraints_in_place(
-            #processed_pdb.all_chain_proxies,
-            pdb_hierarchy=processed_pdb.all_chain_proxies.pdb_hierarchy,
+        isel = selection.iselection()
+        harm_proxy = add_coordinate_restraints(
+            sites_cart=sites_start.select(isel),
             selection=isel,
             sigma=sigma)
+        restraints_manager = mmtbx.restraints.manager(geometry=geometry,
+                                                      normalization = False)
+        restraints_manager.geometry.reference_coordinate_proxies = harm_proxy
         return restraints_manager
 
     def make_wat_restraints(self,sigma):
@@ -152,24 +147,18 @@ class StructData:
         geometry = processed_pdb.geometry_restraints_manager(
             show_energies      = False,
             plain_pairs_radius = 5.0)
+        chain_proxy=processed_pdb.all_chain_proxies
+        sites_start = self.std_wat_xrs.sites_cart()
+        selection=chain_proxy.selection("Element O")
+        isel = selection.iselection()
+        harm_proxy = add_coordinate_restraints(
+            sites_cart=sites_start.select(isel),
+            selection=isel,
+            sigma=sigma)
 
         restraints_manager = mmtbx.restraints.manager(geometry      = geometry,
                                                       normalization = False)
-        #object that stores coordinates
-        sites_start = self.std_wat_xrs.sites_cart()
-        #proxies needed for restraints?
-        chain_proxy=processed_pdb.all_chain_proxies
-        restraints_selection = flex.bool(sites_start.size(), True)
-        select_str="Element O"
-        selection=chain_proxy.selection("Element O")
-        #must select the "i" of an "i-j" pair?
-        isel=selection.iselection()
-        # new restraints system, should add a harmoinc restraint to O
-        restraints_manager.geometry.add_reference_coordinate_restraints_in_place(
-            #processed_pdb.all_chain_proxies,
-            pdb_hierarchy=processed_pdb.all_chain_proxies.pdb_hierarchy,
-            selection=isel,
-            sigma=sigma)
+        restraints_manager.geometry.reference_coordinate_proxies = harm_proxy
         return restraints_manager
 
 
