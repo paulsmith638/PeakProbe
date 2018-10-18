@@ -69,10 +69,10 @@ class KDE:
           laboth = np.zeros(data_array.shape[0],dtype=np.bool_)
           ori_res = np.core.defchararray.strip(data_array['ori'])
           for residue in oth_labels:
-               laboth = np.logical_or(laboth,(data_array['ori'] == residue.strip()))
+               laboth = np.logical_or(laboth,(ori_res == residue.strip()))
           labmet = np.zeros(data_array.shape[0],dtype=np.bool_)
           for residue in met_labels:
-               labmet = np.logical_or(labmet,(data_array['ori'] == residue.strip()))
+               labmet = np.logical_or(labmet,(ori_res == residue.strip()))
           orin = np.zeros(data_array.shape[0],dtype=np.int16)
           orin[labw] = 1
           orin[labs] = 2
